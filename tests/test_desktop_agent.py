@@ -60,3 +60,4 @@ def test_agent_resource_monitor():
     # At non-idle or idle under threshold, should return True
     assert isinstance(is_ok, bool)
     assert len(msg) > 0
+

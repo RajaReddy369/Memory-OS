@@ -95,3 +95,4 @@ class ClipboardWatcher:
                 "window_title": win_info.get("title", "")
             }
         }
+

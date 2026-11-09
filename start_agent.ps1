@@ -17,3 +17,4 @@ Write-Host "Allowed Typing Apps: VS Code, Notepad, Word, Cursor" -ForegroundColo
 Write-Host "Starting agent daemon..." -ForegroundColor Gray
 
 & $VenvPython -m desktop_agent.agent
+

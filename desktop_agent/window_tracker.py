@@ -106,3 +106,4 @@ def get_active_window_info() -> Optional[Dict[str, any]]:
         "is_idle": is_idle,
         "idle_seconds": round(idle_sec, 1)
     }
+

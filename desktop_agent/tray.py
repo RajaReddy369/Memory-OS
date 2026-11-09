@@ -127,3 +127,4 @@ class SystemTrayService:
             self.hotkey_listener.stop()
         if self.icon:
             self.icon.stop()
+

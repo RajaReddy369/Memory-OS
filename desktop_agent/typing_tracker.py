@@ -110,3 +110,4 @@ class SelectiveTypingWatcher:
         if self.listener:
             self.listener.stop()
             self.listener = None
+

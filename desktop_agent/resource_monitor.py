@@ -59,3 +59,4 @@ class AgentResourceMonitor:
                 return False, msg
 
         return True, f"OK (CPU: {cpu}%, RAM: {ram}MB, Idle: {idle})"
+

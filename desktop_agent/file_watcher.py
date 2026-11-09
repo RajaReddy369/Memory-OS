@@ -118,3 +118,4 @@ class FileWatcherService:
             self.observer.stop()
             self.observer.join(timeout=2.0)
             self.observer = None
+
