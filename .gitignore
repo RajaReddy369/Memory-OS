@@ -1,0 +1,24 @@
+# Python & Environments
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Local Data & Secrets (MemoryOS stores in %APPDATA%\MemoryOS by default)
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+
+# Node / Frontend
+node_modules/
+dist/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

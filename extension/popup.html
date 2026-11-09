@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>MemoryOS Status</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header class="header">
+      <div class="brand">
+        <span class="logo-dot"></span>
+        <h1>MemoryOS</h1>
+      </div>
+      <div id="backend-status" class="status-badge offline">Offline</div>
+    </header>
+
+    <!-- Instant Pause Toggle -->
+    <div class="control-card">
+      <div class="control-label">
+        <span class="title">Recording State</span>
+        <span id="recording-desc" class="subtitle">Capturing browser activity</span>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="pause-toggle" checked>
+        <span class="slider round"></span>
+      </label>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <span class="stat-number" id="event-count">0</span>
+        <span class="stat-title">Buffered Events</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-number" id="domain-name">—</span>
+        <span class="stat-title">Current Domain</span>
+      </div>
+    </div>
+
+    <!-- Domain Block Button -->
+    <button id="mute-domain-btn" class="action-btn secondary-btn" disabled>
+      Mute This Domain
+    </button>
+
+    <!-- Security API Key Section -->
+    <div class="settings-card">
+      <label for="api-key-input">Security Token (X-MemoryOS-Key):</label>
+      <div class="input-group">
+        <input type="password" id="api-key-input" placeholder="Paste token from token.txt" />
+        <button id="save-token-btn">Save</button>
+      </div>
+      <p class="token-hint">Auto-saved in <code>%APPDATA%\MemoryOS\token.txt</code></p>
+    </div>
+
+    <footer class="footer">
+      <a href="http://127.0.0.1:8000/docs" target="_blank" class="link-btn">API Docs</a>
+      <span class="separator">•</span>
+      <span id="connection-indicator">Checking backend...</span>
+    </footer>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
