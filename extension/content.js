@@ -65,8 +65,9 @@
     const cleanText = extractCleanPageText();
     const pageTitle = document.title || "";
     const pageUrl = window.location.href;
+    const referrerUrl = document.referrer || null;
 
-    // Report initial page load event
+    // Report initial page load event with referrer link
     chrome.runtime.sendMessage({
       type: "PAGE_VISIT",
       payload: {
@@ -77,7 +78,8 @@
         domain: hostname,
         title: scrubText(pageTitle),
         text_content: scrubText(cleanText),
-        scroll_depth: 0
+        scroll_depth: 0,
+        referrer_url: referrerUrl
       }
     });
 
@@ -202,3 +204,4 @@
     }, true);
   }
 })();
+

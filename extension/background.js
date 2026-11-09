@@ -104,7 +104,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.payload) {
-    queueEvent(message.payload);
+    const payload = message.payload;
+    // Attach referrer from previous active tab if not already present
+    if (!payload.referrer_url && lastActiveTab.url && lastActiveTab.url !== payload.url) {
+      payload.referrer_url = lastActiveTab.url;
+    }
+    queueEvent(payload);
     sendResponse({ status: "queued" });
     return true;
   }
@@ -144,3 +149,4 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     // Tab might have been closed immediately
   }
 });
+

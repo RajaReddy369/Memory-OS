@@ -58,3 +58,4 @@ def test_domain_blocking():
 def test_extract_domain():
     assert extract_domain("https://news.ycombinator.com/item?id=123") == "news.ycombinator.com"
     assert extract_domain("http://localhost:8000/api/health") == "localhost"
+

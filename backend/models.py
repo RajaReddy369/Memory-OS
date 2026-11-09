@@ -1,5 +1,5 @@
 """
-MemoryOS Pydantic Models for Event Ingestion and Search.
+MemoryOS Pydantic Models for Event Ingestion, Search, and RAG Chat.
 """
 
 from typing import Any, Dict, List, Optional
@@ -19,6 +19,9 @@ class EventIngestItem(BaseModel):
     text_content: Optional[str] = Field(default=None, description="Extracted page text, typed text, or window text")
     selected_text: Optional[str] = Field(default=None, description="Highlighted text snippet")
     scroll_depth: Optional[float] = Field(default=0.0, description="Scroll depth percentage (0 - 100)")
+    referrer_url: Optional[str] = Field(default=None, description="Previous page URL from document.referrer")
+    from_event_id: Optional[int] = Field(default=None, description="Referrer parent event ID")
+    session_id: Optional[str] = Field(default=None, description="Session grouping identifier")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Arbitrary extra metadata")
 
 
@@ -49,10 +52,42 @@ class SearchResponse(BaseModel):
     results: List[SearchResultItem]
 
 
+class CitationItem(BaseModel):
+    """Structured citation referencing source activity event."""
+    event_id: int
+    title: str
+    url: Optional[str] = None
+    domain: Optional[str] = None
+    source: str = "browser"
+    timestamp: float
+    time_str: str
+    snippet: str
+    score: float = 0.0
+
+
+class ChatRequest(BaseModel):
+    """RAG Chat request payload."""
+    message: str = Field(..., description="User question or instruction")
+    stream: bool = Field(default=False, description="Whether to stream response tokens")
+    top_k: int = Field(default=5, ge=1, le=20, description="Number of context passages to retrieve")
+    domain: Optional[str] = Field(default=None, description="Filter memory by domain")
+    app_name: Optional[str] = Field(default=None, description="Filter memory by app name")
+    start_time: Optional[float] = Field(default=None, description="Filter start timestamp")
+    end_time: Optional[float] = Field(default=None, description="Filter end timestamp")
+
+
+class ChatResponse(BaseModel):
+    """RAG Chat response payload with grounded citations."""
+    answer: str
+    citations: List[CitationItem]
+    temporal_filter: Optional[Dict[str, Any]] = None
+
+
 class StatusResponse(BaseModel):
     """API health and status response."""
     status: str
     data_dir: str
     db_path: str
     total_events: int
+    total_vectors: int
     recording_active: bool

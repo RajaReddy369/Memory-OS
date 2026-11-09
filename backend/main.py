@@ -1,15 +1,17 @@
 """
 MemoryOS FastAPI Application.
-Handles secured event ingestion, WebSocket broadcasting, FTS5 search, and health status.
+Handles secured event ingestion, WebSocket broadcasting, FTS5 search,
+hybrid RAG chat with citations, streaming, and background embedding.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import logging
-from typing import List, Optional, Set
+from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Security, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from backend.config import API_TOKEN, CORS_ORIGIN_REGEX, DATA_DIR, DB_PATH, HOST, PORT
 from backend.database import (
@@ -21,28 +23,38 @@ from backend.database import (
     insert_events_batch,
     search_events,
 )
+from backend.embedding_worker import enqueue_for_embedding, start_worker, stop_worker
+from backend.llm import get_llm_client
+from backend.memory import handle_special_memory_commands
 from backend.models import (
     BatchIngestRequest,
+    ChatRequest,
+    ChatResponse,
+    CitationItem,
     EventIngestItem,
     SearchResponse,
     SearchResultItem,
     StatusResponse,
 )
+from backend.rag import get_rag_engine
+from backend.vector_store import get_vector_store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("memoryos")
 
-from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifecycle manager for database initialization and cleanup."""
+    """Lifecycle manager for database initialization, worker startup, and cleanup."""
     init_db()
+    start_worker()
     logger.info(f"MemoryOS started on {HOST}:{PORT}")
     logger.info(f"Data directory: {DATA_DIR}")
     logger.info(f"Database path: {DB_PATH}")
     logger.info(f"Security token initialized (length={len(API_TOKEN)})")
     yield
+    stop_worker()
+
 
 app = FastAPI(
     title="MemoryOS API",
@@ -104,12 +116,15 @@ async def health_check():
 @app.get("/api/status", response_model=StatusResponse)
 async def get_status(_: None = Security(verify_api_key)):
     """Retrieve system status and event statistics."""
-    total = get_event_count()
+    total_events = get_event_count()
+    vector_store = get_vector_store()
+    total_vectors = vector_store.count()
     return StatusResponse(
         status="active",
         data_dir=str(DATA_DIR),
         db_path=str(DB_PATH),
-        total_events=total,
+        total_events=total_events,
+        total_vectors=total_vectors,
         recording_active=not is_recording_paused
     )
 
@@ -122,8 +137,7 @@ async def toggle_recording(paused: Optional[bool] = None, _: None = Security(ver
         is_recording_paused = paused
     else:
         is_recording_paused = not is_recording_paused
-    
-    # Broadcast status change to connected UI clients
+
     await broadcast_ws({"type": "status_change", "recording_active": not is_recording_paused})
     return {"recording_active": not is_recording_paused}
 
@@ -133,13 +147,16 @@ async def ingest_single_event(
     event: EventIngestItem,
     _: None = Security(verify_api_key)
 ):
-    """Ingest a single activity event."""
+    """Ingest a single activity event and enqueue for background embedding."""
     if is_recording_paused:
         return {"status": "paused", "stored": False}
 
     event_id = insert_event(event)
     if event_id:
-        # Broadcast event to WebSocket subscribers for live dashboard
+        event_dict = event.model_dump()
+        event_dict["id"] = event_id
+        await enqueue_for_embedding(event_dict)
+
         await broadcast_ws({
             "type": "new_event",
             "event": {
@@ -151,7 +168,9 @@ async def ingest_single_event(
                 "domain": event.domain,
                 "app_name": event.app_name,
                 "timestamp": event.timestamp,
-                "duration": event.duration
+                "duration": event.duration,
+                "referrer_url": event.referrer_url,
+                "from_event_id": event.from_event_id
             }
         })
         return {"status": "ok", "id": event_id, "stored": True}
@@ -167,7 +186,15 @@ async def ingest_batch_events(
     if is_recording_paused:
         return {"status": "paused", "stored_count": 0}
 
-    stored_count = insert_events_batch(batch.events)
+    stored_count = 0
+    for item in batch.events:
+        eid = insert_event(item)
+        if eid:
+            stored_count += 1
+            d = item.model_dump()
+            d["id"] = eid
+            await enqueue_for_embedding(d)
+
     return {"status": "ok", "stored_count": stored_count}
 
 
@@ -193,7 +220,6 @@ async def search_memory(
     _: None = Security(verify_api_key)
 ):
     """Search memory events using SQLite FTS5 BM25 index."""
-    # Ensure parameter types are primitives when called internally or via test
     limit_val = limit if isinstance(limit, int) else 25
     domain_val = domain if isinstance(domain, str) else None
     app_val = app_name if isinstance(app_name, str) else None
@@ -212,6 +238,85 @@ async def search_memory(
         query=q,
         total=len(results),
         results=results
+    )
+
+
+@app.post("/api/chat")
+async def chat_memory(
+    req: ChatRequest,
+    _: None = Security(verify_api_key)
+):
+    """
+    RAG Chat endpoint. Grounded question-answering with structured citations.
+    Supports natural language time filtering ('last Tuesday', 'yesterday afternoon')
+    and streaming responses.
+    """
+    # 1. Check for 'remember that ...' or 'forget this ...' instructions
+    special_reply = handle_special_memory_commands(req.message)
+    if special_reply:
+        return ChatResponse(
+            answer=special_reply,
+            citations=[],
+            temporal_filter=None
+        )
+
+    # 2. Hybrid Retrieval (Time-aware + Dense + BM25 + Cross-Encoder)
+    rag_engine = get_rag_engine()
+    passages, temporal_info = rag_engine.retrieve(
+        query=req.message,
+        top_k=req.top_k,
+        domain=req.domain,
+        app_name=req.app_name,
+        start_time_override=req.start_time,
+        end_time_override=req.end_time
+    )
+
+    citations = [
+        CitationItem(
+            event_id=int(p.get("event_id") or p.get("id") or 0),
+            title=p.get("title") or "Untitled",
+            url=p.get("url"),
+            domain=p.get("domain"),
+            source=p.get("source") or "browser",
+            timestamp=float(p.get("timestamp") or 0.0),
+            time_str=p.get("time_str") or "",
+            snippet=p.get("snippet") or "",
+            score=float(p.get("score") or 0.0)
+        )
+        for p in passages
+    ]
+
+    llm_client = get_llm_client()
+
+    # 3. Handle Streaming Response
+    if req.stream:
+        async def stream_generator() -> AsyncGenerator[str, None]:
+            # Send citations first as metadata event
+            citations_meta = {
+                "type": "citations",
+                "citations": [c.model_dump() for c in citations],
+                "temporal_filter": temporal_info
+            }
+            yield f"data: {json.dumps(citations_meta)}\n\n"
+
+            # Stream LLM tokens
+            async for token in llm_client.stream_generate(req.message, passages):
+                yield f"data: {json.dumps({'type': 'token', 'token': token})}\n\n"
+
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(stream_generator(), media_type="text/event-stream")
+
+    # 4. Standard Non-Streaming Response
+    if not passages:
+        answer = "I couldn't find that in your memory."
+    else:
+        answer = await llm_client.generate(req.message, passages)
+
+    return ChatResponse(
+        answer=answer,
+        citations=citations,
+        temporal_filter=temporal_info
     )
 
 
@@ -244,7 +349,6 @@ async def websocket_endpoint(
     active_websockets.add(websocket)
     try:
         while True:
-            # Keep-alive loop and receiver for client pings
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_text("pong")

@@ -36,8 +36,14 @@ def setup_test_env(monkeypatch):
     """Use an isolated temporary database for API tests."""
     with tempfile.TemporaryDirectory() as tmpdir:
         temp_db_path = Path(tmpdir) / "test_api_memoryos.db"
+        temp_vec_path = Path(tmpdir) / "test_api_vectors.db"
         monkeypatch.setattr(database, "DB_PATH", temp_db_path)
         database.init_db()
+
+        from backend.vector_store import SQLiteDenseVectorStore
+        import backend.vector_store
+        vec_store = SQLiteDenseVectorStore(temp_vec_path)
+        monkeypatch.setattr(backend.vector_store, "_vector_store_instance", vec_store)
         yield
 
 

@@ -1,6 +1,6 @@
 """
-MemoryOS SQLite Database Module with FTS5 Full-Text Search.
-Enables high-performance local structured storage and keyword search.
+MemoryOS SQLite Database Module with FTS5 Full-Text Search and Journey Graph Linking.
+Enables high-performance local structured storage, keyword search, and referrer tracking.
 """
 
 import hashlib
@@ -27,7 +27,7 @@ def get_db_connection() -> sqlite3.Connection:
 
 
 def init_db():
-    """Initialize database tables, indexes, and FTS5 search structures."""
+    """Initialize database tables, indexes, FTS5 search, and schema migrations."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = get_db_connection()
     try:
@@ -49,16 +49,34 @@ def init_db():
                 scroll_depth REAL DEFAULT 0.0,
                 metadata_json TEXT,
                 content_hash TEXT,
+                referrer_url TEXT,
+                from_event_id INTEGER,
+                session_id TEXT,
+                is_embedded INTEGER DEFAULT 0,
                 created_at REAL NOT NULL
             );
             """)
 
-            # Indexes for fast filtering
+            # Migrations: Add new columns if missing in existing table
+            cursor = conn.execute("PRAGMA table_info(events);")
+            columns = {row["name"] for row in cursor.fetchall()}
+            for col_name, col_def in [
+                ("referrer_url", "TEXT"),
+                ("from_event_id", "INTEGER"),
+                ("session_id", "TEXT"),
+                ("is_embedded", "INTEGER DEFAULT 0"),
+            ]:
+                if col_name not in columns:
+                    conn.execute(f"ALTER TABLE events ADD COLUMN {col_name} {col_def};")
+
+            # Indexes for fast filtering and journey links
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_domain ON events(domain);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_app_name ON events(app_name);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_hash ON events(content_hash);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_events_from_event ON events(from_event_id);")
 
             # 2. FTS5 Virtual Table for BM25 full-text keyword search
             conn.execute("""
@@ -106,6 +124,16 @@ def init_db():
                 updated_at REAL NOT NULL
             );
             """)
+
+            # 5. User preferences and facts table
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            """)
     finally:
         conn.close()
 
@@ -120,7 +148,7 @@ def compute_content_hash(text: Optional[str]) -> Optional[str]:
 
 def insert_event(item: EventIngestItem) -> Optional[int]:
     """
-    Scrub, deduplicate, and persist a single activity event.
+    Scrub, deduplicate, resolve referrer graph links, and persist a single activity event.
     Returns inserted event ID or None if skipped/blocked.
     """
     # Exclude blocked domains
@@ -144,7 +172,6 @@ def insert_event(item: EventIngestItem) -> Optional[int]:
     try:
         with conn:
             if content_hash:
-                # Check if same hash was recorded for this URL/app in the last 15 minutes
                 cursor = conn.execute(
                     """
                     SELECT id FROM events 
@@ -154,8 +181,22 @@ def insert_event(item: EventIngestItem) -> Optional[int]:
                     (content_hash, item.url, item.app_name, event_timestamp - 900)
                 )
                 if cursor.fetchone():
-                    # Duplicate content within window, skip to save storage and processing
                     return None
+
+            # Resolve from_event_id via referrer_url if not explicitly provided
+            from_event_id = item.from_event_id
+            if from_event_id is None and item.referrer_url:
+                ref_cur = conn.execute(
+                    """
+                    SELECT id FROM events 
+                    WHERE url = ? AND timestamp <= ? 
+                    ORDER BY timestamp DESC LIMIT 1
+                    """,
+                    (item.referrer_url, event_timestamp)
+                )
+                ref_row = ref_cur.fetchone()
+                if ref_row:
+                    from_event_id = ref_row["id"]
 
             metadata_str = json.dumps(item.metadata or {})
             cursor = conn.execute(
@@ -163,8 +204,9 @@ def insert_event(item: EventIngestItem) -> Optional[int]:
                 INSERT INTO events (
                     event_type, source, timestamp, url, domain, title, app_name,
                     duration, text_content, selected_text, scroll_depth,
-                    metadata_json, content_hash, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    metadata_json, content_hash, referrer_url, from_event_id,
+                    session_id, is_embedded, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
                 """,
                 (
                     item.event_type,
@@ -180,6 +222,9 @@ def insert_event(item: EventIngestItem) -> Optional[int]:
                     item.scroll_depth or 0.0,
                     metadata_str,
                     content_hash,
+                    item.referrer_url,
+                    from_event_id,
+                    item.session_id,
                     now
                 )
             )
@@ -205,25 +250,25 @@ def search_events(
     start_time: Optional[float] = None,
     end_time: Optional[float] = None
 ) -> List[SearchResultItem]:
-    """
-    Execute full-text BM25 keyword search using FTS5 with highlighting and snippets.
-    """
+    """Execute full-text BM25 keyword search using FTS5."""
     clean_query = query.strip()
     if not clean_query:
         return []
 
-    # Prepare FTS query string: escape special characters, allow prefix matching
-    # Remove FTS5 operators to prevent syntax errors
     sanitized_tokens = [re_sub for re_sub in clean_query.replace('"', "").replace("'", "").split() if re_sub]
     if not sanitized_tokens:
         return []
 
-    fts_expression = " ".join([f'"{token}"*' for token in sanitized_tokens])
+    # Filter stopwords for BM25 keyword query to improve natural language question recall
+    stopwords = {"what", "is", "a", "an", "the", "for", "in", "on", "of", "to", "did", "do", "does", "i", "you", "about", "which", "how", "that", "was", "me", "show", "tell", "my", "we", "with"}
+    content_tokens = [t for t in sanitized_tokens if t.lower() not in stopwords]
+    tokens_to_use = content_tokens if content_tokens else sanitized_tokens
+
+    fts_expression = " OR ".join([f'"{token}"*' for token in tokens_to_use])
 
     conn = get_db_connection()
     results: List[SearchResultItem] = []
     try:
-        # Build query filters
         conditions = ["events_fts MATCH ?"]
         params: List[Any] = [fts_expression]
 
@@ -233,10 +278,10 @@ def search_events(
         if app_name:
             conditions.append("e.app_name = ?")
             params.append(app_name)
-        if start_time:
+        if start_time is not None:
             conditions.append("e.timestamp >= ?")
             params.append(start_time)
-        if end_time:
+        if end_time is not None:
             conditions.append("e.timestamp <= ?")
             params.append(end_time)
 
@@ -267,7 +312,6 @@ def search_events(
         cursor = conn.execute(sql, params)
         for row in cursor.fetchall():
             snippet = row["text_snippet"] or row["selected_text"] or row["title"] or ""
-            # Invert BM25 so higher score is better for ranking
             score = round(abs(float(row["rank_score"])), 4)
             results.append(
                 SearchResultItem(
@@ -284,8 +328,7 @@ def search_events(
                     duration=row["duration"] or 0.0
                 )
             )
-    except sqlite3.OperationalError as e:
-        # Fallback to simple LIKE search if complex FTS syntax encounters syntax limitations
+    except sqlite3.OperationalError:
         fallback_sql = """
         SELECT id, event_type, source, timestamp, url, domain, title, app_name, duration, text_content
         FROM events
@@ -335,7 +378,8 @@ def get_recent_events(limit: int = 50) -> List[Dict[str, Any]]:
     try:
         cursor = conn.execute(
             """
-            SELECT id, event_type, source, timestamp, url, domain, title, app_name, duration, scroll_depth
+            SELECT id, event_type, source, timestamp, url, domain, title, app_name,
+                   duration, scroll_depth, referrer_url, from_event_id, session_id
             FROM events
             ORDER BY timestamp DESC
             LIMIT ?

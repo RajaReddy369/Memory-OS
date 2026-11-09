@@ -83,3 +83,4 @@ def test_blocked_domain_rejection():
     result = database.insert_event(item)
     assert result is None
     assert database.get_event_count() == 0
+
