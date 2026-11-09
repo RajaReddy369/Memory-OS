@@ -44,6 +44,12 @@ from backend.database import (
     search_events,
 )
 from backend.graph3d import get_real_graph3d_data, get_real_graph3d_node_detail
+from backend.tree_service import (
+    get_nested_branch_tree,
+    get_tree_roots,
+    get_youtube_searches_list,
+    get_youtube_videos_list,
+)
 from backend.embedding_worker import enqueue_for_embedding, start_worker, stop_worker
 from backend.llm import get_llm_client
 from backend.memory import handle_special_memory_commands
@@ -602,6 +608,58 @@ async def get_graph3d_node_detail_endpoint(
     if not detail:
         raise HTTPException(status_code=404, detail="Node not found")
     return detail
+
+
+# =========================================================================
+# STAGE 2: BRANCH TREE & YOUTUBE MODULE ENDPOINTS
+# =========================================================================
+
+@app.get("/api/tree/roots")
+async def get_tree_roots_endpoint(
+    from_time: Optional[float] = Query(None, alias="from"),
+    to_time: Optional[float] = Query(None, alias="to"),
+    _: None = Security(verify_api_key)
+):
+    """
+    Retrieve root domains initiating browsing branches and search queries.
+    """
+    return get_tree_roots(from_time=from_time, to_time=to_time)
+
+
+@app.get("/api/tree")
+async def get_nested_branch_tree_endpoint(
+    domain: Optional[str] = Query(None),
+    from_time: Optional[float] = Query(None, alias="from"),
+    to_time: Optional[float] = Query(None, alias="to"),
+    _: None = Security(verify_api_key)
+):
+    """
+    Retrieve hierarchical nested branch tree (website -> search -> page/video -> next navigation).
+    """
+    return get_nested_branch_tree(domain=domain, from_time=from_time, to_time=to_time)
+
+
+@app.get("/api/youtube/searches")
+async def get_youtube_searches_endpoint(
+    limit: int = Query(100),
+    _: None = Security(verify_api_key)
+):
+    """
+    Retrieve searches conducted on YouTube with linked videos count and watch time.
+    """
+    return get_youtube_searches_list(limit=limit)
+
+
+@app.get("/api/youtube/videos")
+async def get_youtube_videos_endpoint(
+    q: Optional[str] = Query(None),
+    limit: int = Query(100),
+    _: None = Security(verify_api_key)
+):
+    """
+    Retrieve list of watched YouTube videos with real play time and channel details.
+    """
+    return get_youtube_videos_list(query=q, limit=limit)
 
 
 def main():

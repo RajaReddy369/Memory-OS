@@ -232,3 +232,4 @@ export async function importBrowserHistory(options = {}, onProgress = () => {}) 
   onProgress({ phase: "done", importedCount: totalImported, message: `Import complete! Saved ${totalImported} events.` });
   return { success: true, count: totalImported };
 }
+

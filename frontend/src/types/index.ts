@@ -187,6 +187,36 @@ export interface SearchTimelineItem {
   } | null;
 }
 
+export interface YouTubeVideoItem {
+  video_id: string;
+  title: string;
+  channel?: string;
+  description?: string;
+  duration: number;
+  play_time: number;
+  upload_date?: string;
+  search_query?: string;
+  referrer_url?: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface BranchTreeNode {
+  id: string;
+  type: "domain" | "search" | "page" | "video";
+  label?: string;
+  query?: string;
+  title?: string;
+  url?: string;
+  domain?: string;
+  channel?: string;
+  duration?: number;
+  play_time?: number;
+  timestamp?: number;
+  children?: BranchTreeNode[];
+}
+
+
 export interface Graph3DNode {
   id: string;
   eventId?: number;

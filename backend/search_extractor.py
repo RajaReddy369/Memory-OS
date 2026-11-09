@@ -133,3 +133,31 @@ def extract_search_query(url: Optional[str]) -> Optional[Tuple[str, str]]:
 
     return None
 
+
+def extract_youtube_video_id(url: Optional[str]) -> Optional[str]:
+    """
+    Extract YouTube 11-character video ID from watch, embed, or short URLs.
+    Supports youtube.com/watch?v=ID, youtu.be/ID, and youtube.com/embed/ID.
+    """
+    if not url:
+        return None
+    try:
+        parsed = urlparse(url)
+        domain = (parsed.netloc or "").lower().split(":")[0]
+        if "youtube.com" in domain:
+            params = parse_qs(parsed.query)
+            if "v" in params and params["v"]:
+                return params["v"][0]
+            if parsed.path.startswith("/embed/") or parsed.path.startswith("/v/") or parsed.path.startswith("/shorts/"):
+                parts = [p for p in parsed.path.split("/") if p]
+                if len(parts) >= 2:
+                    return parts[1]
+        elif "youtu.be" in domain:
+            parts = [p for p in parsed.path.split("/") if p]
+            if parts:
+                return parts[0]
+    except Exception:
+        pass
+    return None
+
+

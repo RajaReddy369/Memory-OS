@@ -16,12 +16,17 @@ import {
   RotateCcw,
   Sparkles,
   ChevronRight,
+  ChevronDown,
   Filter,
+  GitBranch,
+  Play,
 } from "lucide-react";
 import {
   WebsiteDetail,
   WebsiteSummaryItem,
   SearchTimelineItem,
+  BranchTreeNode,
+  YouTubeVideoItem,
 } from "../../types";
 
 interface WebsitesLogViewProps {
@@ -29,18 +34,123 @@ interface WebsitesLogViewProps {
   initialDomain?: string | null;
 }
 
+const BranchTreeItem: React.FC<{
+  node: BranchTreeNode;
+  onFlyTo3D: (domain: string) => void;
+  level?: number;
+}> = ({ node, onFlyTo3D, level = 0 }) => {
+  const [isExpanded, setIsExpanded] = useState(true);
+  const hasChildren = node.children && node.children.length > 0;
+
+  return (
+    <div className="flex flex-col select-none my-0.5" style={{ marginLeft: `${level > 0 ? 16 : 0}px` }}>
+      <div
+        className="flex items-center gap-2 py-1.5 px-2.5 rounded-lg hover:bg-slate-800/60 cursor-pointer text-xs group transition-colors"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        {hasChildren ? (
+          <span className="text-slate-400 group-hover:text-cyan-400 flex-shrink-0">
+            {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+          </span>
+        ) : (
+          <span className="w-3.5 h-3.5 flex items-center justify-center text-slate-600 flex-shrink-0">•</span>
+        )}
+
+        {node.type === "domain" && (
+          <div className="flex items-center gap-2">
+            <Globe className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />
+            <span className="font-bold text-slate-100">{node.label}</span>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onFlyTo3D(node.label || "");
+              }}
+              className="opacity-0 group-hover:opacity-100 px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-[10px] text-cyan-300 transition-opacity"
+            >
+              Fly in 3D
+            </button>
+          </div>
+        )}
+
+        {node.type === "search" && (
+          <div className="flex items-center gap-2">
+            <Search className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+            <span className="font-semibold text-amber-300">"{node.query}"</span>
+            <span className="text-[10px] text-slate-500">({node.domain})</span>
+          </div>
+        )}
+
+        {node.type === "page" && (
+          <div className="flex items-center gap-2 truncate max-w-2xl">
+            <ExternalLink className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+            <a
+              href={node.url}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="text-slate-200 hover:text-emerald-300 truncate"
+            >
+              {node.title || node.url}
+            </a>
+            {node.duration ? (
+              <span className="text-[10px] text-slate-500 font-mono flex-shrink-0">
+                {Math.round(node.duration)}s
+              </span>
+            ) : null}
+          </div>
+        )}
+
+        {node.type === "video" && (
+          <div className="flex items-center gap-2 truncate max-w-2xl">
+            <Play className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
+            <a
+              href={node.url}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="text-slate-200 hover:text-red-300 truncate font-medium"
+            >
+              {node.title || node.url}
+            </a>
+            {node.channel && (
+              <span className="text-[10px] text-red-300 bg-red-950/50 px-1.5 py-0.5 rounded border border-red-500/30 flex-shrink-0">
+                {node.channel}
+              </span>
+            )}
+            {node.play_time ? (
+              <span className="text-[10px] text-amber-400 font-mono flex-shrink-0">
+                Watched {Math.round(node.play_time)}s
+              </span>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      {hasChildren && isExpanded && (
+        <div className="border-l border-slate-800/80 ml-3 pl-1 flex flex-col">
+          {node.children!.map((child) => (
+            <BranchTreeItem key={child.id} node={child} onFlyTo3D={onFlyTo3D} level={level + 1} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const WebsitesLogView: React.FC<WebsitesLogViewProps> = ({
   onFlyToDomainIn3D,
   initialDomain,
 }) => {
-  // Tabs: "websites" | "searches"
-  const [activeTab, setActiveTab] = useState<"websites" | "searches">("websites");
+  // Tabs: "websites" | "searches" | "tree" | "youtube"
+  const [activeTab, setActiveTab] = useState<"websites" | "searches" | "tree" | "youtube">("websites");
 
   // Data states
   const [websites, setWebsites] = useState<WebsiteSummaryItem[]>([]);
   const [selectedDomain, setSelectedDomain] = useState<string | null>(initialDomain || null);
   const [selectedDetail, setSelectedDetail] = useState<WebsiteDetail | null>(null);
   const [searches, setSearches] = useState<SearchTimelineItem[]>([]);
+  const [treeNodes, setTreeNodes] = useState<BranchTreeNode[]>([]);
+  const [youtubeVideos, setYoutubeVideos] = useState<YouTubeVideoItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [backfillMessage, setBackfillMessage] = useState<string | null>(null);
@@ -90,7 +200,37 @@ export const WebsitesLogView: React.FC<WebsitesLogViewProps> = ({
     }
   };
 
-  // 3. Fetch specific website detail
+  // 3. Fetch branch tree
+  const fetchTree = async () => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/tree", {
+        headers: { "X-MemoryOS-Key": token },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTreeNodes(Array.isArray(data) ? data : []);
+      }
+    } catch {
+      setTreeNodes([]);
+    }
+  };
+
+  // 4. Fetch YouTube videos
+  const fetchYouTube = async () => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/youtube/videos", {
+        headers: { "X-MemoryOS-Key": token },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setYoutubeVideos(Array.isArray(data) ? data : []);
+      }
+    } catch {
+      setYoutubeVideos([]);
+    }
+  };
+
+  // 5. Fetch specific website detail
   const fetchWebsiteDetail = async (dom: string) => {
     setIsLoading(true);
     try {
@@ -113,6 +253,8 @@ export const WebsitesLogView: React.FC<WebsitesLogViewProps> = ({
   useEffect(() => {
     fetchWebsites();
     fetchSearches();
+    fetchTree();
+    fetchYouTube();
   }, []);
 
   useEffect(() => {
@@ -324,6 +466,36 @@ export const WebsitesLogView: React.FC<WebsitesLogViewProps> = ({
               }`}
             >
               Searches Timeline ({searches.length})
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab("tree");
+                setSelectedDomain(null);
+                fetchTree();
+              }}
+              className={`px-3 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5 ${
+                activeTab === "tree"
+                  ? "bg-cyan-500 text-slate-950 shadow-md font-bold"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <GitBranch className="w-3.5 h-3.5" />
+              Branch Tree
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab("youtube");
+                setSelectedDomain(null);
+                fetchYouTube();
+              }}
+              className={`px-3 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5 ${
+                activeTab === "youtube"
+                  ? "bg-cyan-500 text-slate-950 shadow-md font-bold"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Play className="w-3.5 h-3.5" />
+              YouTube ({youtubeVideos.length})
             </button>
           </div>
 
@@ -728,8 +900,8 @@ export const WebsitesLogView: React.FC<WebsitesLogViewProps> = ({
               </table>
             </div>
           </div>
-        ) : (
-          /* VIEW 3: UNIFIED SEARCHES TIMELINE */
+        ) : activeTab === "searches" ? (
+          /* VIEW 2: UNIFIED SEARCHES TIMELINE */
           <div className="flex-1 overflow-y-auto p-8 space-y-6 max-w-5xl mx-auto w-full">
             {/* Filter controls */}
             <div className="flex flex-wrap items-center justify-between gap-4">
@@ -852,7 +1024,133 @@ export const WebsitesLogView: React.FC<WebsitesLogViewProps> = ({
               )}
             </div>
           </div>
-        )}
+        ) : activeTab === "tree" ? (
+          /* VIEW 3: COLLAPSIBLE 2D BRANCH TREE */
+          <div className="flex-1 overflow-y-auto p-8 max-w-6xl mx-auto w-full space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <GitBranch className="w-5 h-5 text-cyan-400" />
+                  Hierarchical Branch Tree
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Trace browsing trees from root domains down into search queries, opened pages, and videos.
+                </p>
+              </div>
+              <button
+                onClick={fetchTree}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 rounded-lg text-xs font-medium flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Refresh Tree
+              </button>
+            </div>
+
+            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-2">
+              {treeNodes.length === 0 ? (
+                <div className="text-center py-16 text-slate-500 font-mono text-xs">
+                  No browsing branches recorded yet. Perform a search or browse to see your cognitive tree.
+                </div>
+              ) : (
+                treeNodes.map((rootNode) => (
+                  <BranchTreeItem
+                    key={rootNode.id}
+                    node={rootNode}
+                    onFlyTo3D={onFlyToDomainIn3D}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        ) : activeTab === "youtube" ? (
+          /* VIEW 4: YOUTUBE WATCH LOG & PLAY TIMES */
+          <div className="flex-1 overflow-y-auto p-8 max-w-6xl mx-auto w-full space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Play className="w-5 h-5 text-red-500" />
+                  YouTube Activity Log
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Track actual play times measured from the video player, channel details, and originating search queries.
+                </p>
+              </div>
+              <button
+                onClick={fetchYouTube}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 rounded-lg text-xs font-medium flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Refresh Videos
+              </button>
+            </div>
+
+            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-950/80 border-b border-slate-800 text-slate-400 font-mono text-[11px] uppercase tracking-wider">
+                  <tr>
+                    <th className="py-3 px-5">Video Title</th>
+                    <th className="py-3 px-4">Channel</th>
+                    <th className="py-3 px-4">Watch Time</th>
+                    <th className="py-3 px-4">Duration</th>
+                    <th className="py-3 px-4">Found Via Search</th>
+                    <th className="py-3 px-5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {youtubeVideos.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="text-center py-16 text-slate-500 font-mono">
+                        No YouTube video watches recorded yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    youtubeVideos.map((yt) => (
+                      <tr key={yt.video_id} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="py-3 px-5 font-semibold text-slate-200">
+                          <a
+                            href={`https://www.youtube.com/watch?v=${yt.video_id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="hover:text-red-400 transition-colors flex items-center gap-2 max-w-md truncate"
+                          >
+                            <Play className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
+                            <span className="truncate">{yt.title}</span>
+                          </a>
+                        </td>
+                        <td className="py-3 px-4">
+                          {yt.channel ? (
+                            <span className="px-2 py-0.5 rounded-md bg-red-950/40 text-red-300 border border-red-800/30 font-mono text-[11px]">
+                              {yt.channel}
+                            </span>
+                          ) : (
+                            <span className="text-slate-500">—</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-amber-300">
+                          {Math.round(yt.play_time)}s
+                        </td>
+                        <td className="py-3 px-4 font-mono text-slate-400">
+                          {yt.duration > 0 ? `${Math.round(yt.duration)}s` : "—"}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-cyan-300">
+                          {yt.search_query ? `"${yt.search_query}"` : "—"}
+                        </td>
+                        <td className="py-3 px-5 text-right">
+                          <button
+                            onClick={() => onFlyToDomainIn3D("youtube.com")}
+                            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 rounded-lg text-[11px] font-mono transition-colors"
+                          >
+                            Fly in 3D
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

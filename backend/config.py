@@ -17,6 +17,9 @@ def get_default_data_dir() -> Path:
         target = Path(custom_dir)
         try:
             target.mkdir(parents=True, exist_ok=True)
+            test_file = target / ".write_test"
+            test_file.touch()
+            test_file.unlink(missing_ok=True)
             return target
         except OSError:
             pass
@@ -26,6 +29,9 @@ def get_default_data_dir() -> Path:
         try:
             target = Path(appdata) / "MemoryOS"
             target.mkdir(parents=True, exist_ok=True)
+            test_file = target / ".write_test"
+            test_file.touch()
+            test_file.unlink(missing_ok=True)
             return target
         except (PermissionError, OSError):
             pass
@@ -33,6 +39,9 @@ def get_default_data_dir() -> Path:
     try:
         target = Path.home() / ".memoryos"
         target.mkdir(parents=True, exist_ok=True)
+        test_file = target / ".write_test"
+        test_file.touch()
+        test_file.unlink(missing_ok=True)
         return target
     except (PermissionError, OSError):
         pass
@@ -162,3 +171,7 @@ NEURAL_RERANKER_MODEL = os.environ.get("MEMORYOS_RERANKER_MODEL", "BAAI/bge-rera
 MAX_IDLE_CPU_PERCENT = 3.0   # Must stay under 3% CPU at idle
 MAX_IDLE_RAM_MB = 150.0      # Must stay under 150MB RAM at idle
 IDLE_THRESHOLD_SECONDS = 120 # 2 minutes of no input marks system idle
+
+# YouTube Module Configuration
+FETCH_YOUTUBE_TRANSCRIPTS = os.environ.get("MEMORYOS_FETCH_YOUTUBE_TRANSCRIPTS", "false").lower() in ("true", "1", "yes")
+

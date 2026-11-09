@@ -202,6 +202,156 @@
         }
       }, 1500); // 1.5s debounce
     }, true);
+
+    // 6. YouTube Module (SPA Navigation & Real Play Time Tracking)
+    if (hostname.includes("youtube.com")) {
+      let currentYTUrl = window.location.href;
+      let lastYTSearchQuery = null;
+      let ytPlayStartTime = null;
+      let ytAccumulatedPlaySeconds = 0;
+      let activeYTVideoEl = null;
+
+      function getYTVideoId(url) {
+        try {
+          const parsed = new URL(url);
+          if (parsed.searchParams.has("v")) return parsed.searchParams.get("v");
+          if (parsed.pathname.startsWith("/shorts/")) return parsed.pathname.split("/")[2];
+        } catch {}
+        return null;
+      }
+
+      function attachYTVideoListeners() {
+        const video = document.querySelector("video");
+        if (!video || activeYTVideoEl === video) return;
+        activeYTVideoEl = video;
+
+        video.addEventListener("play", () => {
+          ytPlayStartTime = performance.now();
+        });
+        video.addEventListener("pause", () => {
+          if (ytPlayStartTime !== null) {
+            ytAccumulatedPlaySeconds += (performance.now() - ytPlayStartTime) / 1000;
+            ytPlayStartTime = null;
+          }
+        });
+        video.addEventListener("ended", () => {
+          if (ytPlayStartTime !== null) {
+            ytAccumulatedPlaySeconds += (performance.now() - ytPlayStartTime) / 1000;
+            ytPlayStartTime = null;
+          }
+        });
+      }
+
+      function flushYTVideo(urlToFlush) {
+        if (ytPlayStartTime !== null) {
+          ytAccumulatedPlaySeconds += (performance.now() - ytPlayStartTime) / 1000;
+          ytPlayStartTime = null;
+        }
+
+        const vId = getYTVideoId(urlToFlush);
+        if (vId && ytAccumulatedPlaySeconds >= 1.0) {
+          const titleEl = document.querySelector("h1.ytd-watch-metadata, h1.title yt-formatted-string, #title h1");
+          const channelEl = document.querySelector("ytd-channel-name a, #owner-name a, #upload-info #channel-name a");
+          const descEl = document.querySelector("#description-inline-expander, #description yt-formatted-string");
+          const dateEl = document.querySelector("#info-strings yt-formatted-string, #date yt-formatted-string");
+          const video = document.querySelector("video");
+
+          const vTitle = titleEl ? (titleEl.innerText || titleEl.textContent || "").trim() : document.title.replace(" - YouTube", "");
+          const vChannel = channelEl ? (channelEl.innerText || channelEl.textContent || "").trim() : "";
+          const vDesc = descEl ? (descEl.innerText || descEl.textContent || "").trim().slice(0, 1000) : "";
+          const vDate = dateEl ? (dateEl.innerText || dateEl.textContent || "").trim() : "";
+          const vDur = video && video.duration ? video.duration : 0.0;
+
+          chrome.runtime.sendMessage({
+            type: "YOUTUBE_VIDEO",
+            payload: {
+              event_type: "youtube_video",
+              source: "browser",
+              timestamp: Date.now() / 1000,
+              url: urlToFlush,
+              domain: "youtube.com",
+              title: scrubText(vTitle),
+              duration: vDur,
+              play_time: Math.round(ytAccumulatedPlaySeconds * 10) / 10,
+              text_content: scrubText(`${vTitle} (${vChannel}). ${vDesc}`),
+              metadata: {
+                video_id: vId,
+                channel: vChannel,
+                description: vDesc,
+                upload_date: vDate,
+                search_query: lastYTSearchQuery,
+                duration: vDur,
+                play_time: Math.round(ytAccumulatedPlaySeconds * 10) / 10
+              }
+            }
+          });
+        }
+        ytAccumulatedPlaySeconds = 0;
+        ytPlayStartTime = null;
+      }
+
+      function handleYTNavigation() {
+        const newUrl = window.location.href;
+        if (newUrl === currentYTUrl) return;
+
+        // Flush previous video if leaving watch page
+        if (currentYTUrl.includes("/watch") || currentYTUrl.includes("/shorts/")) {
+          flushYTVideo(currentYTUrl);
+        }
+
+        currentYTUrl = newUrl;
+
+        // Check if on search results page
+        if (newUrl.includes("/results")) {
+          try {
+            const parsed = new URL(newUrl);
+            const q = parsed.searchParams.get("search_query") || parsed.searchParams.get("q");
+            if (q) {
+              lastYTSearchQuery = q.trim();
+              chrome.runtime.sendMessage({
+                type: "SEARCH_QUERY",
+                payload: {
+                  event_type: "search_query",
+                  source: "browser",
+                  timestamp: Date.now() / 1000,
+                  url: newUrl,
+                  domain: "youtube.com",
+                  title: `YouTube Search: ${lastYTSearchQuery}`,
+                  text_content: lastYTSearchQuery,
+                  metadata: {
+                    query: lastYTSearchQuery,
+                    engine: "YouTube",
+                    extracted_from_url: true
+                  }
+                }
+              });
+            }
+          } catch {}
+        } else if (newUrl.includes("/watch") || newUrl.includes("/shorts/")) {
+          setTimeout(attachYTVideoListeners, 1500);
+        }
+      }
+
+      // Initial check
+      if (currentYTUrl.includes("/watch") || currentYTUrl.includes("/shorts/")) {
+        setTimeout(attachYTVideoListeners, 1500);
+      } else if (currentYTUrl.includes("/results")) {
+        try {
+          const parsed = new URL(currentYTUrl);
+          lastYTSearchQuery = parsed.searchParams.get("search_query") || parsed.searchParams.get("q");
+        } catch {}
+      }
+
+      window.addEventListener("yt-navigate-finish", handleYTNavigation);
+      window.addEventListener("popstate", handleYTNavigation);
+      setInterval(handleYTNavigation, 1000);
+
+      window.addEventListener("beforeunload", () => {
+        if (currentYTUrl.includes("/watch") || currentYTUrl.includes("/shorts/")) {
+          flushYTVideo(currentYTUrl);
+        }
+      });
+    }
   }
 })();
 

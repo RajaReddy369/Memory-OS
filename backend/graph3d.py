@@ -348,3 +348,4 @@ def get_real_graph3d_node_detail(node_id: str) -> Optional[Dict[str, Any]]:
         return None
     finally:
         conn.close()
+

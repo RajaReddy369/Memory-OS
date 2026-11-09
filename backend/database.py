@@ -11,10 +11,10 @@ import time
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
-from backend.config import DB_PATH, DEFAULT_BLOCKED_DOMAINS
+from backend.config import DB_PATH, DEFAULT_BLOCKED_DOMAINS, FETCH_YOUTUBE_TRANSCRIPTS
 from backend.models import EventIngestItem, SearchResultItem
 from backend.scrubber import extract_domain, is_domain_blocked, scrub_text
-from backend.search_extractor import extract_search_query
+from backend.search_extractor import extract_search_query, extract_youtube_video_id
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -179,12 +179,86 @@ def init_db():
             );
             """)
 
+            # 7. YouTube Videos Table (Stage 2)
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS youtube_videos (
+                video_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                channel TEXT,
+                description TEXT,
+                duration REAL DEFAULT 0.0,
+                play_time REAL DEFAULT 0.0,
+                upload_date TEXT,
+                search_query TEXT,
+                referrer_url TEXT,
+                event_id INTEGER,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_yt_query ON youtube_videos(search_query);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_yt_created ON youtube_videos(created_at);")
+
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_time ON sessions(start_time, end_time);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_label);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_session_events_sid ON session_events(session_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_session_events_eid ON session_events(event_id);")
     finally:
         conn.close()
+
+
+def upsert_youtube_video(
+    video_id: str,
+    title: str,
+    channel: Optional[str] = None,
+    description: Optional[str] = None,
+    duration: float = 0.0,
+    play_time: float = 0.0,
+    upload_date: Optional[str] = None,
+    search_query: Optional[str] = None,
+    referrer_url: Optional[str] = None,
+    event_id: Optional[int] = None,
+    conn: Optional[sqlite3.Connection] = None
+) -> None:
+    """Insert or update a watched YouTube video record with real play time and search query link."""
+    now = time.time()
+    should_close = False
+    if conn is None:
+        conn = get_db_connection()
+        should_close = True
+    try:
+        cur = conn.execute("SELECT play_time, search_query, duration FROM youtube_videos WHERE video_id = ?", (video_id,))
+        row = cur.fetchone()
+        if row:
+            new_play_time = max(float(row["play_time"] or 0.0), play_time)
+            effective_query = search_query or row["search_query"]
+            effective_duration = duration if duration > 0 else float(row["duration"] or 0.0)
+            conn.execute("""
+            UPDATE youtube_videos SET
+                title = ?,
+                channel = COALESCE(?, channel),
+                description = COALESCE(?, description),
+                duration = ?,
+                play_time = ?,
+                upload_date = COALESCE(?, upload_date),
+                search_query = ?,
+                referrer_url = COALESCE(?, referrer_url),
+                event_id = COALESCE(?, event_id),
+                updated_at = ?
+            WHERE video_id = ?
+            """, (title, channel, description, effective_duration, new_play_time, upload_date, effective_query, referrer_url, event_id, now, video_id))
+        else:
+            conn.execute("""
+            INSERT INTO youtube_videos (
+                video_id, title, channel, description, duration, play_time,
+                upload_date, search_query, referrer_url, event_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (video_id, title, channel, description, duration, play_time, upload_date, search_query, referrer_url, event_id, now, now))
+        if should_close:
+            conn.commit()
+    finally:
+        if should_close:
+            conn.close()
 
 
 def compute_content_hash(text: Optional[str]) -> Optional[str]:
@@ -211,6 +285,13 @@ def insert_event(item: EventIngestItem) -> Optional[int]:
     clean_title = scrub_text(item.title)
     clean_text = scrub_text(item.text_content)
     clean_selected = scrub_text(item.selected_text)
+
+    # For YouTube videos, assemble title + channel + description if text_content is not set
+    if (item.event_type == "youtube_video" or (domain and "youtube.com" in domain)) and not clean_text:
+        meta = item.metadata or {}
+        ch = meta.get("channel") or ""
+        desc = meta.get("description") or ""
+        clean_text = scrub_text(f"{clean_title} ({ch}). {desc}".strip())
 
     # Deduplicate near-identical content if recent duplicate exists
     content_hash = compute_content_hash(clean_text)
@@ -246,6 +327,23 @@ def insert_event(item: EventIngestItem) -> Optional[int]:
                 ref_row = ref_cur.fetchone()
                 if ref_row:
                     from_event_id = ref_row["id"]
+
+            # Referrer fallback: attach orphan page/video to nearest earlier search in same session or past 30 mins
+            if from_event_id is None and item.event_type not in ("search_query", "window_focus", "clipboard"):
+                fb_cond = ["event_type = 'search_query'", "timestamp <= ?", "timestamp >= ?"]
+                fb_params: List[Any] = [event_timestamp, event_timestamp - 1800]
+                if item.session_id:
+                    fb_cond.append("session_id = ?")
+                    fb_params.append(item.session_id)
+                fb_cur = conn.execute(
+                    f"SELECT id, url FROM events WHERE {' AND '.join(fb_cond)} ORDER BY timestamp DESC LIMIT 1",
+                    fb_params
+                )
+                fb_row = fb_cur.fetchone()
+                if fb_row:
+                    from_event_id = fb_row["id"]
+                    if not item.referrer_url:
+                        item.referrer_url = fb_row["url"]
 
             metadata_str = json.dumps(item.metadata or {})
             cursor = conn.execute(
@@ -361,6 +459,38 @@ def insert_event(item: EventIngestItem) -> Optional[int]:
                             item.session_id,
                             now
                         )
+                    )
+
+            # 3. YouTube video tracking & watch-time linking
+            video_id = extract_youtube_video_id(item.url) if item.url else None
+            if item.event_type == "youtube_video" or (domain and "youtube.com" in domain and video_id):
+                if video_id:
+                    meta = item.metadata or {}
+                    yt_channel = meta.get("channel")
+                    yt_desc = meta.get("description")
+                    yt_dur = float(meta.get("duration") or item.duration or 0.0)
+                    yt_play = float(meta.get("play_time") or 0.0)
+                    yt_date = meta.get("upload_date")
+                    yt_query = meta.get("search_query")
+
+                    if not yt_query and from_event_id:
+                        fe_cur = conn.execute("SELECT text_content, title, event_type FROM events WHERE id = ?", (from_event_id,))
+                        fe_row = fe_cur.fetchone()
+                        if fe_row and fe_row["event_type"] == "search_query":
+                            yt_query = fe_row["text_content"] or fe_row["title"].replace("YouTube Search: ", "")
+
+                    upsert_youtube_video(
+                        video_id=video_id,
+                        title=clean_title,
+                        channel=yt_channel,
+                        description=yt_desc,
+                        duration=yt_dur,
+                        play_time=yt_play,
+                        upload_date=yt_date,
+                        search_query=yt_query,
+                        referrer_url=item.referrer_url,
+                        event_id=last_id,
+                        conn=conn
                     )
 
             return last_id
