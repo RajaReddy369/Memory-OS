@@ -129,3 +129,4 @@ def get_rag_engine() -> HybridRAGEngine:
     if _rag_engine_instance is None:
         _rag_engine_instance = HybridRAGEngine()
     return _rag_engine_instance
+

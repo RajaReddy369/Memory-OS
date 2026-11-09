@@ -91,3 +91,4 @@ class StatusResponse(BaseModel):
     total_events: int
     total_vectors: int
     recording_active: bool
+    ollama_status: str = "unknown"

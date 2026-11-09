@@ -56,3 +56,4 @@ def test_parse_last_tuesday():
     assert "last tuesday" not in clean_q.lower()
     start_dt = datetime.fromtimestamp(start_ts)
     assert start_dt.weekday() == 1 # Tuesday
+

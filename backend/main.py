@@ -13,11 +13,14 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, Security, We
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from backend.config import API_TOKEN, CORS_ORIGIN_REGEX, DATA_DIR, DB_PATH, HOST, PORT
+from backend.config import API_TOKEN, CORS_ORIGIN_REGEX, DATA_DIR, DB_PATH, HOST, OLLAMA_HOST, PORT
 from backend.database import (
     get_db_connection,
     get_event_count,
+    get_projects,
     get_recent_events,
+    get_session_by_id,
+    get_sessions,
     init_db,
     insert_event,
     insert_events_batch,
@@ -36,7 +39,8 @@ from backend.models import (
     SearchResultItem,
     StatusResponse,
 )
-from backend.rag import get_rag_engine
+from backend.rag import format_timestamp, get_rag_engine
+from backend.sessions import recompute_sessions
 from backend.vector_store import get_vector_store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -113,20 +117,73 @@ async def health_check():
     }
 
 
+async def check_ollama_status() -> str:
+    """Check connectivity to local Ollama instance."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            res = await client.get(f"{OLLAMA_HOST}/api/tags")
+            if res.status_code == 200:
+                return "online"
+    except Exception:
+        pass
+    logger.warning("[MemoryOS Warning] Local Ollama server is unreachable on %s", OLLAMA_HOST)
+    return "unreachable (warning: running in fallback mode)"
+
+
 @app.get("/api/status", response_model=StatusResponse)
 async def get_status(_: None = Security(verify_api_key)):
-    """Retrieve system status and event statistics."""
+    """Retrieve system status, event statistics, and Ollama connection health."""
     total_events = get_event_count()
     vector_store = get_vector_store()
     total_vectors = vector_store.count()
+    ollama_stat = await check_ollama_status()
+
     return StatusResponse(
         status="active",
         data_dir=str(DATA_DIR),
         db_path=str(DB_PATH),
         total_events=total_events,
         total_vectors=total_vectors,
-        recording_active=not is_recording_paused
+        recording_active=not is_recording_paused,
+        ollama_status=ollama_stat
     )
+
+
+@app.get("/api/sessions")
+async def list_sessions(
+    from_time: Optional[float] = Query(None, alias="from"),
+    to_time: Optional[float] = Query(None, alias="to"),
+    project: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    _: None = Security(verify_api_key)
+):
+    """Retrieve list of segmented user activity sessions."""
+    sessions = get_sessions(start_time=from_time, end_time=to_time, project=project, limit=limit)
+    return {"sessions": sessions, "count": len(sessions)}
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session_detail(
+    session_id: str,
+    _: None = Security(verify_api_key)
+):
+    """Retrieve detailed session data including ordered event graph for 3D visualization."""
+    session = get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+@app.post("/api/sessions/segment")
+async def trigger_session_segmentation(
+    start_time: Optional[float] = Query(None),
+    end_time: Optional[float] = Query(None),
+    _: None = Security(verify_api_key)
+):
+    """Trigger on-demand re-computation of activity sessions."""
+    created = await recompute_sessions(start_time=start_time, end_time=end_time)
+    return {"status": "ok", "sessions_created": len(created), "sessions": created}
 
 
 @app.post("/api/recording/toggle")
@@ -271,9 +328,28 @@ async def chat_memory(
         end_time_override=req.end_time
     )
 
+    # Check for matching work sessions in the requested timeframe
+    st = temporal_info.get("start_time") or req.start_time
+    et = temporal_info.get("end_time") or req.end_time
+    if st is not None and et is not None:
+        matching_sessions = get_sessions(start_time=st, end_time=et, limit=3)
+        for s in reversed(matching_sessions):
+            passages.insert(0, {
+                "id": s["id"],
+                "event_id": 0,
+                "title": f"Session: {s['title']} [{s['project_label']}]",
+                "url": f"/api/sessions/{s['id']}",
+                "domain": s.get("primary_domain") or s.get("primary_app") or "desktop",
+                "source": "session",
+                "timestamp": s["start_time"],
+                "time_str": format_timestamp(s["start_time"]),
+                "snippet": f"Session Summary: {s['summary']} Duration: {round(s['duration']/60, 1)} minutes across {s['event_count']} actions in {s.get('primary_app', 'desktop')}.",
+                "score": 0.95
+            })
+
     citations = [
         CitationItem(
-            event_id=int(p.get("event_id") or p.get("id") or 0),
+            event_id=int(p.get("event_id") or p.get("id") or 0) if str(p.get("event_id") or p.get("id") or "0").isdigit() else 0,
             title=p.get("title") or "Untitled",
             url=p.get("url"),
             domain=p.get("domain"),

@@ -121,3 +121,4 @@ def handle_special_memory_commands(query: str) -> Optional[str]:
             conn.close()
 
     return None
+

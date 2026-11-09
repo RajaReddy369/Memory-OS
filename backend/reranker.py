@@ -115,3 +115,4 @@ def get_reranker() -> CrossEncoderReranker:
     if _reranker_instance is None:
         _reranker_instance = CrossEncoderReranker()
     return _reranker_instance
+

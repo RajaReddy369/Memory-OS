@@ -324,3 +324,4 @@ def get_vector_store():
         else:
             _vector_store_instance = SQLiteDenseVectorStore()
     return _vector_store_instance
+

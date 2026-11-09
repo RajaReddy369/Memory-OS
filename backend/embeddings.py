@@ -125,3 +125,4 @@ def get_embedding_provider():
     if _provider_instance is None:
         _provider_instance = OllamaEmbeddingProvider()
     return _provider_instance
+

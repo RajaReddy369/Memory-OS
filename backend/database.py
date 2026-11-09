@@ -134,6 +134,53 @@ def init_db():
                 updated_at REAL NOT NULL
             );
             """)
+
+            # 6. Sessions, session events, and projects tables (Phase 3)
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                project_label TEXT NOT NULL,
+                start_time REAL NOT NULL,
+                end_time REAL NOT NULL,
+                duration REAL NOT NULL,
+                event_count INTEGER NOT NULL,
+                primary_app TEXT,
+                primary_domain TEXT,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            """)
+
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS session_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                event_id INTEGER NOT NULL,
+                sequence_order INTEGER NOT NULL,
+                app_or_domain TEXT,
+                referrer_url TEXT,
+                from_event_id INTEGER,
+                timestamp REAL NOT NULL
+            );
+            """)
+
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS projects (
+                name TEXT PRIMARY KEY,
+                description TEXT,
+                first_seen REAL NOT NULL,
+                last_seen REAL NOT NULL,
+                total_duration REAL DEFAULT 0.0,
+                session_count INTEGER DEFAULT 0
+            );
+            """)
+
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_time ON sessions(start_time, end_time);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_label);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_session_events_sid ON session_events(session_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_session_events_eid ON session_events(event_id);")
     finally:
         conn.close()
 
@@ -389,3 +436,194 @@ def get_recent_events(limit: int = 50) -> List[Dict[str, Any]]:
         return [dict(row) for row in cursor.fetchall()]
     finally:
         conn.close()
+
+
+def save_session_record(session_data: Dict[str, Any], event_rows: List[Dict[str, Any]]) -> str:
+    """Save or update a computed session, linking its events and updating projects table."""
+    conn = get_db_connection()
+    sid = session_data["id"]
+    now = time.time()
+    try:
+        with conn:
+            # 1. Insert or update session
+            conn.execute("""
+            INSERT OR REPLACE INTO sessions (
+                id, title, summary, project_label, start_time, end_time,
+                duration, event_count, primary_app, primary_domain, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                sid,
+                session_data["title"],
+                session_data["summary"],
+                session_data["project_label"],
+                session_data["start_time"],
+                session_data["end_time"],
+                session_data["duration"],
+                session_data["event_count"],
+                session_data.get("primary_app", ""),
+                session_data.get("primary_domain", ""),
+                session_data.get("created_at", now),
+                now
+            ))
+
+            # 2. Clear old session events links and re-link
+            conn.execute("DELETE FROM session_events WHERE session_id = ?", (sid,))
+            for seq, ev in enumerate(event_rows):
+                conn.execute("""
+                INSERT INTO session_events (
+                    session_id, event_id, sequence_order, app_or_domain,
+                    referrer_url, from_event_id, timestamp
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    sid,
+                    ev["id"],
+                    seq,
+                    ev.get("domain") or ev.get("app_name") or "desktop",
+                    ev.get("referrer_url"),
+                    ev.get("from_event_id"),
+                    ev.get("timestamp", 0.0)
+                ))
+                # Update event's session_id in main events table
+                conn.execute("UPDATE events SET session_id = ? WHERE id = ?", (sid, ev["id"]))
+
+            # 3. Update projects table
+            proj_name = session_data["project_label"]
+            conn.execute("""
+            INSERT INTO projects (name, description, first_seen, last_seen, total_duration, session_count)
+            VALUES (?, ?, ?, ?, ?, 1)
+            ON CONFLICT(name) DO UPDATE SET
+                last_seen = MAX(projects.last_seen, excluded.last_seen),
+                total_duration = projects.total_duration + excluded.total_duration,
+                session_count = projects.session_count + 1
+            """, (
+                proj_name,
+                f"Project for {proj_name}",
+                session_data["start_time"],
+                session_data["end_time"],
+                session_data["duration"]
+            ))
+
+        return sid
+    finally:
+        conn.close()
+
+
+def get_sessions(
+    start_time: Optional[float] = None,
+    end_time: Optional[float] = None,
+    project: Optional[str] = None,
+    limit: int = 50
+) -> List[Dict[str, Any]]:
+    """Retrieve list of segmented sessions."""
+    conn = get_db_connection()
+    try:
+        conditions = ["1=1"]
+        params: List[Any] = []
+        if start_time is not None:
+            conditions.append("end_time >= ?")
+            params.append(start_time)
+        if end_time is not None:
+            conditions.append("start_time <= ?")
+            params.append(end_time)
+        if project:
+            conditions.append("project_label = ?")
+            params.append(project)
+
+        where_sql = " AND ".join(conditions)
+        params.append(limit)
+
+        cursor = conn.execute(f"""
+        SELECT id, title, summary, project_label, start_time, end_time,
+               duration, event_count, primary_app, primary_domain, created_at, updated_at
+        FROM sessions
+        WHERE {where_sql}
+        ORDER BY start_time DESC
+        LIMIT ?
+        """, params)
+
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_session_by_id(session_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve complete session detail including ordered events and referrer links for 3D view."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        session_dict = dict(row)
+
+        # Get linked events with details
+        ev_cursor = conn.execute("""
+        SELECT se.sequence_order, se.app_or_domain, se.referrer_url, se.from_event_id,
+               e.id as event_id, e.event_type, e.source, e.timestamp, e.url, e.domain,
+               e.title, e.app_name, e.duration, e.selected_text, e.scroll_depth
+        FROM session_events se
+        JOIN events e ON se.event_id = e.id
+        WHERE se.session_id = ?
+        ORDER BY se.sequence_order ASC
+        """, (session_id,))
+
+        events = [dict(r) for r in ev_cursor.fetchall()]
+        session_dict["events"] = events
+
+        # Build graph edges between events for the 3D journey view
+        edges = []
+        for ev in events:
+            if ev.get("from_event_id"):
+                edges.append({
+                    "source": ev["from_event_id"],
+                    "target": ev["event_id"],
+                    "type": "referrer"
+                })
+
+        session_dict["edges"] = edges
+        return session_dict
+    finally:
+        conn.close()
+
+
+def get_projects() -> List[Dict[str, Any]]:
+    """Retrieve all identified projects with aggregated stats."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute("""
+        SELECT name, description, first_seen, last_seen, total_duration, session_count
+        FROM projects
+        ORDER BY last_seen DESC
+        """)
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_raw_events_for_period(start_time: Optional[float] = None, end_time: Optional[float] = None) -> List[Dict[str, Any]]:
+    """Fetch raw events in chronological order for session segmentation."""
+    conn = get_db_connection()
+    try:
+        conditions = ["1=1"]
+        params: List[Any] = []
+        if start_time is not None:
+            conditions.append("timestamp >= ?")
+            params.append(start_time)
+        if end_time is not None:
+            conditions.append("timestamp <= ?")
+            params.append(end_time)
+
+        where_sql = " AND ".join(conditions)
+        cursor = conn.execute(f"""
+        SELECT id, event_type, source, timestamp, url, domain, title, app_name,
+               duration, text_content, selected_text, scroll_depth, referrer_url,
+               from_event_id, session_id
+        FROM events
+        WHERE {where_sql}
+        ORDER BY timestamp ASC
+        """, params)
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+

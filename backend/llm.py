@@ -133,3 +133,4 @@ def get_llm_client() -> LocalOllamaClient:
     if _llm_client_instance is None:
         _llm_client_instance = LocalOllamaClient()
     return _llm_client_instance
+

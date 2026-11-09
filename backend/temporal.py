@@ -125,3 +125,4 @@ def parse_temporal_query(query: str, reference_time: Optional[datetime] = None) 
     clean_query = " ".join(clean_query.strip().split())
 
     return clean_query, start_ts, end_ts
+

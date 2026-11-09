@@ -160,3 +160,4 @@ def stop_worker():
     if _worker_task and not _worker_task.done():
         _worker_task.cancel()
         _worker_task = None
+

@@ -97,3 +97,4 @@ def create_chunks_for_event(
         })
 
     return records
+
