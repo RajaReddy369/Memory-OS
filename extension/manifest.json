@@ -8,7 +8,8 @@
     "tabs",
     "storage",
     "webNavigation",
-    "sidePanel"
+    "sidePanel",
+    "scripting"
   ],
   "optional_permissions": [
     "history"

@@ -11,6 +11,7 @@ import {
   Calendar,
   Filter,
   Upload,
+  Cpu,
 } from "lucide-react";
 import { Project, ViewMode, ZoomLevel, DataSummary } from "../../types";
 
@@ -130,6 +131,18 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           <Globe2 className="w-4 h-4" />
           Websites Log
+        </button>
+
+        <button
+          onClick={() => onSetViewMode("APPS")}
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+            viewMode === "APPS"
+              ? "bg-fuchsia-500 text-slate-950 shadow-md shadow-fuchsia-500/30"
+              : "text-slate-300 hover:text-white hover:bg-slate-800/60"
+          }`}
+        >
+          <Cpu className="w-4 h-4" />
+          Apps Graph
         </button>
       </div>
 

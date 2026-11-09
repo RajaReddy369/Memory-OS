@@ -59,22 +59,68 @@ document.addEventListener("DOMContentLoaded", async () => {
   async function checkBackend() {
     try {
       const res = await fetch(`${API_URL}/api/health`, { method: "GET" });
-      if (res.ok) {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+
+      let token = apiKeyInput.value.trim();
+
+      // If token missing, attempt automatic handshake with local backend
+      if (!token) {
+        try {
+          const authRes = await fetch(`${API_URL}/api/auth/token`);
+          if (authRes.ok) {
+            const authData = await authRes.json();
+            if (authData.token) {
+              token = authData.token;
+              apiKeyInput.value = token;
+              await chrome.storage.local.set({ apiKey: token });
+            }
+          }
+        } catch (e) {
+          // Handshake fallback
+        }
+      }
+
+      // Fetch live database metrics with auth token
+      const sumRes = await fetch(`${API_URL}/api/data/summary`, {
+        headers: token ? { "X-MemoryOS-Key": token } : {}
+      });
+
+      if (sumRes.ok) {
         backendStatus.textContent = "Online";
         backendStatus.className = "status-badge online";
-        connectionIndicator.textContent = "Connected (127.0.0.1:8000)";
+        connectionIndicator.textContent = "Connected & Authenticated (127.0.0.1:8000)";
+        const sumData = await sumRes.json();
+        eventCountEl.textContent = sumData.total_events;
+      } else if (sumRes.status === 401) {
+        // Try one re-sync if 401
+        try {
+          const authRes = await fetch(`${API_URL}/api/auth/token`);
+          if (authRes.ok) {
+            const authData = await authRes.json();
+            if (authData.token && authData.token !== token) {
+              token = authData.token;
+              apiKeyInput.value = token;
+              await chrome.storage.local.set({ apiKey: token });
+              const retryRes = await fetch(`${API_URL}/api/data/summary`, {
+                headers: { "X-MemoryOS-Key": token }
+              });
+              if (retryRes.ok) {
+                backendStatus.textContent = "Online";
+                backendStatus.className = "status-badge online";
+                connectionIndicator.textContent = "Connected & Authenticated (127.0.0.1:8000)";
+                const retryData = await retryRes.json();
+                eventCountEl.textContent = retryData.total_events;
+                return;
+              }
+            }
+          }
+        } catch {}
 
-        // Fetch live database metrics
-        const token = apiKeyInput.value.trim();
-        const sumRes = await fetch(`${API_URL}/api/data/summary`, {
-          headers: token ? { "X-MemoryOS-Key": token } : {}
-        });
-        if (sumRes.ok) {
-          const sumData = await sumRes.json();
-          eventCountEl.textContent = sumData.total_events;
-        }
+        backendStatus.textContent = "Auth Required";
+        backendStatus.className = "status-badge offline";
+        connectionIndicator.textContent = "Token required: Paste from token.txt";
       } else {
-        throw new Error("HTTP " + res.status);
+        throw new Error("HTTP " + sumRes.status);
       }
     } catch (err) {
       backendStatus.textContent = "Offline";

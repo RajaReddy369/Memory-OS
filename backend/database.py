@@ -203,6 +203,39 @@ def init_db():
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_label);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_session_events_sid ON session_events(session_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_session_events_eid ON session_events(event_id);")
+
+            # 8. Unified Graph Store (Nodes & Edges for Apps, Documents, Websites, and GraphRAG)
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS graph_nodes (
+                id TEXT PRIMARY KEY,
+                node_type TEXT NOT NULL,
+                label TEXT NOT NULL,
+                weight REAL DEFAULT 0.0,
+                source TEXT,
+                parent_id TEXT,
+                properties TEXT,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_gn_type ON graph_nodes(node_type);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_gn_parent ON graph_nodes(parent_id);")
+
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS graph_edges (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                edge_type TEXT NOT NULL,
+                weight REAL DEFAULT 1.0,
+                confidence TEXT DEFAULT 'confirmed',
+                properties TEXT,
+                created_at REAL NOT NULL
+            );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ge_source ON graph_edges(source_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ge_target ON graph_edges(target_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ge_type ON graph_edges(edge_type);")
     finally:
         conn.close()
 
@@ -492,6 +525,12 @@ def insert_event(item: EventIngestItem) -> Optional[int]:
                         event_id=last_id,
                         conn=conn
                     )
+
+            try:
+                from backend.apps_graph import invalidate_graph_cache
+                invalidate_graph_cache()
+            except Exception:
+                pass
 
             return last_id
     finally:
@@ -1316,6 +1355,12 @@ def get_data_summary() -> Dict[str, Any]:
         file_cur = conn.execute("SELECT COUNT(*) FROM events WHERE event_type LIKE 'file_%';")
         total_files = file_cur.fetchone()[0]
 
+        # Total graph nodes and edges
+        node_cur = conn.execute("SELECT COUNT(*) FROM graph_nodes;")
+        total_graph_nodes = node_cur.fetchone()[0]
+        edge_cur = conn.execute("SELECT COUNT(*) FROM graph_edges;")
+        total_graph_edges = edge_cur.fetchone()[0]
+
         return {
             "total_events": total_events,
             "first_timestamp": first_ts,
@@ -1324,6 +1369,8 @@ def get_data_summary() -> Dict[str, Any]:
             "total_domains": row["total_domains"] if row else 0,
             "total_apps": row["total_apps"] if row else 0,
             "total_files": total_files,
+            "total_graph_nodes": total_graph_nodes,
+            "total_graph_edges": total_graph_edges,
             "sources": sources
         }
     finally:

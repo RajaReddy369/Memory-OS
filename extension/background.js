@@ -23,6 +23,45 @@ async function getSettings() {
   };
 }
 
+// Automatically sync security token from local backend if missing or rotated
+async function autoSyncToken(apiUrl = DEFAULT_API_URL) {
+  try {
+    const res = await fetch(`${apiUrl}/api/auth/token`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.token) {
+        await chrome.storage.local.set({ apiKey: data.token });
+        console.info("MemoryOS security token synced successfully from backend.");
+        return data.token;
+      }
+    }
+  } catch (err) {
+    console.debug("MemoryOS backend token auto-sync offline/deferred:", err.message);
+  }
+  return null;
+}
+
+// Auto-sync token on service worker startup and inject content script into existing tabs
+chrome.runtime.onInstalled.addListener(async () => {
+  await autoSyncToken();
+  try {
+    const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
+    for (const tab of tabs) {
+      if (!isIncognito(tab) && tab.id) {
+        chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ["content.js"]
+        }).catch(() => {});
+      }
+    }
+  } catch (e) {
+    // Ignore tab script injection warnings on protected browser tabs
+  }
+});
+
+// Run token sync on initial background worker activation
+autoSyncToken();
+
 // 3. Queue and flush events to MemoryOS local API
 async function queueEvent(eventData) {
   const settings = await getSettings();
@@ -43,6 +82,11 @@ async function flushQueue() {
   isFlushing = true;
 
   const settings = await getSettings();
+  let apiKey = settings.apiKey;
+  if (!apiKey) {
+    apiKey = await autoSyncToken(settings.apiUrl);
+  }
+
   const toSend = [...eventQueue];
   eventQueue = [];
 
@@ -50,8 +94,8 @@ async function flushQueue() {
     const headers = {
       "Content-Type": "application/json"
     };
-    if (settings.apiKey) {
-      headers["X-MemoryOS-Key"] = settings.apiKey;
+    if (apiKey) {
+      headers["X-MemoryOS-Key"] = apiKey;
     }
 
     // Send single or batch depending on count
@@ -69,8 +113,16 @@ async function flushQueue() {
       body: body
     });
 
+    if (response.status === 401) {
+      // Token mismatch or expired: re-sync token immediately and re-queue events
+      console.warn("MemoryOS Ingestion 401 Unauthorized: Attempting automatic token sync...");
+      const refreshedToken = await autoSyncToken(settings.apiUrl);
+      eventQueue = [...toSend, ...eventQueue];
+      return;
+    }
+
     if (!response.ok) {
-      // Re-queue on failure (keep up to 300 events)
+      // Re-queue on other failure (keep up to 300 events)
       eventQueue = [...toSend.slice(-200), ...eventQueue];
       console.warn("MemoryOS Ingestion returned status:", response.status);
     }

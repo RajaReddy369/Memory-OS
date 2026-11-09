@@ -62,9 +62,36 @@ def get_or_create_api_token() -> str:
     if env_token:
         return env_token.strip()
 
+    # 1. Check primary TOKEN_FILE
     if TOKEN_FILE.exists():
         try:
             token = TOKEN_FILE.read_text(encoding="utf-8").strip()
+            if token:
+                return token
+        except Exception:
+            pass
+
+    # 2. Check APPDATA location if different
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        appdata_token = Path(appdata) / "MemoryOS" / "token.txt"
+        if appdata_token.exists() and appdata_token != TOKEN_FILE:
+            try:
+                token = appdata_token.read_text(encoding="utf-8").strip()
+                if token:
+                    try:
+                        TOKEN_FILE.write_text(token, encoding="utf-8")
+                    except Exception:
+                        pass
+                    return token
+            except Exception:
+                pass
+
+    # 3. Check workspace data location if different
+    ws_token = Path.cwd() / "data" / "token.txt"
+    if ws_token.exists() and ws_token != TOKEN_FILE:
+        try:
+            token = ws_token.read_text(encoding="utf-8").strip()
             if token:
                 return token
         except Exception:
@@ -104,8 +131,8 @@ DEFAULT_BLOCKED_DOMAINS: Set[str] = {
     "vault.bitwarden.com",
 }
 
-# CORS Allowed Origins
-CORS_ORIGIN_REGEX = r"^(http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?|chrome-extension://.*)$"
+# CORS Allowed Origins (support localhost and all browser extension protocols)
+CORS_ORIGIN_REGEX = r"^(http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?|(chrome-extension|edge-extension|extension|moz-extension)://.*)$"
 
 # ========================================================
 # Phase 3: Desktop Agent Configurations

@@ -13,6 +13,15 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, Security, We
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from backend.apps_graph import (
+    delete_app_graph,
+    detect_graph_communities,
+    get_app_subgraph,
+    get_apps_tree,
+    get_graph_neighbors,
+    get_graph_path,
+    route_graphrag_query,
+)
 from backend.config import (
     API_TOKEN,
     CORS_ORIGIN_REGEX,
@@ -138,6 +147,8 @@ def verify_api_key(
         )
 
 
+import re
+
 @app.get("/api/health")
 async def health_check():
     """Unauthenticated health check endpoint."""
@@ -146,6 +157,31 @@ async def health_check():
         "service": "MemoryOS",
         "version": "1.0.0"
     }
+
+
+@app.get("/api/auth/token")
+async def get_token_for_extension(request: Request):
+    """
+    Allow browser extensions or localhost to securely bootstrap the API token.
+    Validates Origin/Referer against allowed extension schemes and localhost.
+    Rejects any cross-origin requests from external websites with 403 Forbidden.
+    """
+    origin = request.headers.get("origin", "").lower()
+    referer = request.headers.get("referer", "").lower()
+
+    is_extension = bool(re.match(r"^(chrome-extension|edge-extension|extension|moz-extension)://", origin)) or \
+                   bool(re.match(r"^(chrome-extension|edge-extension|extension|moz-extension)://", referer))
+    is_localhost = bool(re.match(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?", origin)) or \
+                   bool(re.match(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?", referer)) or \
+                   (not origin and not referer)
+
+    if is_extension or is_localhost:
+        return {"status": "ok", "token": API_TOKEN}
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Forbidden: Token auto-handshake permitted only from local extensions or localhost."
+    )
 
 
 async def check_ollama_status() -> str:
@@ -361,6 +397,25 @@ async def chat_memory(
         start_time_override=req.start_time,
         end_time_override=req.end_time
     )
+
+    # 2b. GraphRAG Traversal Query Routing for apps, documents, and navigation paths
+    try:
+        graphrag_match = route_graphrag_query(req.message)
+        if graphrag_match:
+            passages.insert(0, {
+                "id": "graphrag_match",
+                "event_id": 0,
+                "title": f"GraphRAG: {graphrag_match.get('route_type', 'path_traversal')}",
+                "url": f"/api/graph/path?from={graphrag_match.get('from', '')}&to={graphrag_match.get('to', '')}" if "from" in graphrag_match else "/api/apps/tree",
+                "domain": "graphrag",
+                "source": "graphrag",
+                "timestamp": time.time(),
+                "time_str": "Graph Traversal",
+                "snippet": graphrag_match["answer_context"],
+                "score": 0.99
+            })
+    except Exception as e:
+        logger.debug(f"GraphRAG router skipped: {e}")
 
     # Check for matching work sessions in the requested timeframe
     st = temporal_info.get("start_time") or req.start_time
@@ -660,6 +715,76 @@ async def get_youtube_videos_endpoint(
     Retrieve list of watched YouTube videos with real play time and channel details.
     """
     return get_youtube_videos_list(query=q, limit=limit)
+
+
+# =========================================================================
+# APPS AS GRAPH NODES & UNIFIED GRAPHRAG ENDPOINTS
+# =========================================================================
+
+@app.get("/api/apps/tree")
+async def get_apps_tree_endpoint(_: None = Security(verify_api_key)):
+    """
+    Retrieve nested hierarchy starting from 'root:desktop':
+    Desktop -> App -> App Session -> Window Item -> File / Search.
+    Empty database returns only root node.
+    """
+    return get_apps_tree()
+
+
+@app.get("/api/graph/neighbors")
+async def get_graph_neighbors_endpoint(
+    id: str = Query(..., description="Node ID to center the search around"),
+    hops: int = Query(1, ge=1, le=3, description="Exploration radius / hops"),
+    _: None = Security(verify_api_key)
+):
+    """
+    Retrieve neighbor nodes and cross-link edges centered around an entity node.
+    """
+    return get_graph_neighbors(node_id=id, hops=hops)
+
+
+@app.get("/api/graph/path")
+async def get_graph_path_endpoint(
+    from_node: str = Query(..., alias="from", description="Origin node ID, app name, or label"),
+    to_node: str = Query(..., alias="to", description="Destination node ID, website, or label"),
+    _: None = Security(verify_api_key)
+):
+    """
+    Find shortest graph traversal path between two nodes (e.g. app to app, or app to website).
+    """
+    return get_graph_path(from_id=from_node, to_id=to_node)
+
+
+@app.get("/api/apps/{app_name}/graph")
+async def get_app_graph_endpoint(
+    app_name: str,
+    _: None = Security(verify_api_key)
+):
+    """
+    Retrieve the specific subgraph for an application with its sessions and cross-links.
+    """
+    return get_app_subgraph(app_name=app_name)
+
+
+@app.delete("/api/apps/{app_name}")
+async def delete_app_graph_endpoint(
+    app_name: str,
+    _: None = Security(verify_api_key)
+):
+    """
+    Delete all nodes, sessions, window items, and edges related to an app from SQLite,
+    NetworkX, and the 3D cache.
+    """
+    res = delete_app_graph(app_name=app_name)
+    return {"status": "ok", "deleted": res}
+
+
+@app.get("/api/graph/communities")
+async def get_graph_communities_endpoint(_: None = Security(verify_api_key)):
+    """
+    Detect multi-modal graph communities across apps, websites, files, and projects.
+    """
+    return detect_graph_communities()
 
 
 def main():

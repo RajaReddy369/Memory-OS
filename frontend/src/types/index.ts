@@ -2,9 +2,51 @@ declare global {
   const chrome: any;
 }
 
-export type ViewMode = "JOURNEY" | "GALAXY" | "CITY" | "2D_TIMELINE" | "WEBSITES";
+export type ViewMode = "JOURNEY" | "GALAXY" | "CITY" | "2D_TIMELINE" | "WEBSITES" | "APPS";
 
 export type ZoomLevel = "YEAR" | "MONTH" | "DAY" | "SESSION" | "PAGE" | "ACTION";
+
+export interface AppTreeNode {
+  id: string;
+  label: string;
+  node_type: string;
+  weight: number;
+  source: string;
+  properties?: Record<string, any>;
+  children?: AppTreeNode[];
+}
+
+export interface GraphNeighborData {
+  center_id: string;
+  hops: number;
+  nodes: {
+    id: string;
+    label: string;
+    node_type: string;
+    weight: number;
+    source: string;
+    properties?: Record<string, any>;
+  }[];
+  edges: {
+    id: string;
+    source: string;
+    target: string;
+    edge_type: string;
+    weight: number;
+    confidence: string;
+    properties?: Record<string, any>;
+  }[];
+}
+
+export interface GraphCommunityItem {
+  community_id: number;
+  label: string;
+  node_count: number;
+  apps: string[];
+  websites: string[];
+  files: string[];
+  projects: string[];
+}
 
 export interface Project {
   id: string;

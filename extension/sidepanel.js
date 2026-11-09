@@ -21,7 +21,20 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   let apiKey = "";
   const stored = await chrome.storage.local.get(["apiKey"]);
-  if (stored.apiKey) apiKey = stored.apiKey;
+  if (stored.apiKey) {
+    apiKey = stored.apiKey;
+  } else {
+    try {
+      const authRes = await fetch(`${API_URL}/api/auth/token`);
+      if (authRes.ok) {
+        const authData = await authRes.json();
+        if (authData.token) {
+          apiKey = authData.token;
+          await chrome.storage.local.set({ apiKey });
+        }
+      }
+    } catch {}
+  }
 
   // 1. Check Backend Connectivity
   async function checkBackend() {

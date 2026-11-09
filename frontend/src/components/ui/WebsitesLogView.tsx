@@ -161,14 +161,48 @@ export const WebsitesLogView: React.FC<WebsitesLogViewProps> = ({
   const [dateRange, setDateRange] = useState<"all" | "today" | "7d" | "30d">("all");
   const [selectedEngineFilter, setSelectedEngineFilter] = useState<string>("all");
 
-  const token = localStorage.getItem("memoryos_token") || "";
+  const [token, setToken] = useState<string>(() => localStorage.getItem("memoryos_token") || "");
+
+  const getAuthToken = async (): Promise<string> => {
+    let t = token || localStorage.getItem("memoryos_token") || "";
+    if (t) return t;
+
+    try {
+      if (typeof chrome !== "undefined" && chrome?.storage?.local) {
+        const stored = await chrome.storage.local.get(["apiKey"]);
+        if (stored?.apiKey) {
+          localStorage.setItem("memoryos_token", stored.apiKey);
+          setToken(stored.apiKey);
+          return stored.apiKey;
+        }
+      }
+    } catch {}
+
+    try {
+      const authRes = await fetch("http://127.0.0.1:8000/api/auth/token");
+      if (authRes.ok) {
+        const authData = await authRes.json();
+        if (authData.token) {
+          localStorage.setItem("memoryos_token", authData.token);
+          setToken(authData.token);
+          if (typeof chrome !== "undefined" && chrome?.storage?.local) {
+            chrome.storage.local.set({ apiKey: authData.token });
+          }
+          return authData.token;
+        }
+      }
+    } catch {}
+
+    return "";
+  };
 
   // 1. Fetch websites list
   const fetchWebsites = async () => {
     setIsLoading(true);
+    const activeToken = await getAuthToken();
     try {
       const res = await fetch("http://127.0.0.1:8000/api/websites", {
-        headers: { "X-MemoryOS-Key": token },
+        headers: activeToken ? { "X-MemoryOS-Key": activeToken } : {},
       });
       if (res.ok) {
         const data = await res.json();
@@ -185,9 +219,10 @@ export const WebsitesLogView: React.FC<WebsitesLogViewProps> = ({
 
   // 2. Fetch searches list
   const fetchSearches = async () => {
+    const activeToken = await getAuthToken();
     try {
       const res = await fetch("http://127.0.0.1:8000/api/searches", {
-        headers: { "X-MemoryOS-Key": token },
+        headers: activeToken ? { "X-MemoryOS-Key": activeToken } : {},
       });
       if (res.ok) {
         const data = await res.json();
@@ -202,9 +237,10 @@ export const WebsitesLogView: React.FC<WebsitesLogViewProps> = ({
 
   // 3. Fetch branch tree
   const fetchTree = async () => {
+    const activeToken = await getAuthToken();
     try {
       const res = await fetch("http://127.0.0.1:8000/api/tree", {
-        headers: { "X-MemoryOS-Key": token },
+        headers: activeToken ? { "X-MemoryOS-Key": activeToken } : {},
       });
       if (res.ok) {
         const data = await res.json();
@@ -217,9 +253,10 @@ export const WebsitesLogView: React.FC<WebsitesLogViewProps> = ({
 
   // 4. Fetch YouTube videos
   const fetchYouTube = async () => {
+    const activeToken = await getAuthToken();
     try {
       const res = await fetch("http://127.0.0.1:8000/api/youtube/videos", {
-        headers: { "X-MemoryOS-Key": token },
+        headers: activeToken ? { "X-MemoryOS-Key": activeToken } : {},
       });
       if (res.ok) {
         const data = await res.json();
@@ -233,9 +270,10 @@ export const WebsitesLogView: React.FC<WebsitesLogViewProps> = ({
   // 5. Fetch specific website detail
   const fetchWebsiteDetail = async (dom: string) => {
     setIsLoading(true);
+    const activeToken = await getAuthToken();
     try {
       const res = await fetch(`http://127.0.0.1:8000/api/websites/${encodeURIComponent(dom)}`, {
-        headers: { "X-MemoryOS-Key": token },
+        headers: activeToken ? { "X-MemoryOS-Key": activeToken } : {},
       });
       if (res.ok) {
         const data = await res.json();

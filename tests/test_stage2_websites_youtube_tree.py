@@ -312,3 +312,4 @@ def test_backfill_search_queries_and_deletion():
 
     # Google events should now be gone
     assert len(get_all_searches(domain="google.com")) == 0
+

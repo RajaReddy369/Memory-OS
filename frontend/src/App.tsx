@@ -18,6 +18,7 @@ import { DockedChatPanel } from "./components/ui/DockedChatPanel";
 import { ReplayController } from "./components/ui/ReplayController";
 import { TwoDTimelineFallback } from "./components/ui/TwoDTimelineFallback";
 import { WebsitesLogView } from "./components/ui/WebsitesLogView";
+import { AppsGraphView } from "./components/ui/AppsGraphView";
 import {
   AlertTriangle,
   Compass,
@@ -78,12 +79,46 @@ export const App: React.FC = () => {
   const [importCount, setImportCount] = useState<number | null>(null);
   const [isImporting, setIsImporting] = useState(false);
 
-  const token = localStorage.getItem("memoryos_token") || "";
+  const [token, setToken] = useState<string>(() => localStorage.getItem("memoryos_token") || "");
+
+  const getAuthToken = async (): Promise<string> => {
+    let t = token || localStorage.getItem("memoryos_token") || "";
+    if (t) return t;
+
+    try {
+      if (typeof chrome !== "undefined" && chrome?.storage?.local) {
+        const stored = await chrome.storage.local.get(["apiKey"]);
+        if (stored?.apiKey) {
+          localStorage.setItem("memoryos_token", stored.apiKey);
+          setToken(stored.apiKey);
+          return stored.apiKey;
+        }
+      }
+    } catch {}
+
+    try {
+      const authRes = await fetch("http://127.0.0.1:8000/api/auth/token");
+      if (authRes.ok) {
+        const authData = await authRes.json();
+        if (authData.token) {
+          localStorage.setItem("memoryos_token", authData.token);
+          setToken(authData.token);
+          if (typeof chrome !== "undefined" && chrome?.storage?.local) {
+            chrome.storage.local.set({ apiKey: authData.token });
+          }
+          return authData.token;
+        }
+      }
+    } catch {}
+
+    return "";
+  };
 
   // 8. Fetch real database events & topology
   const fetchRealData = async () => {
     setIsLoadingData(true);
-    const headers: Record<string, string> = token ? { "X-MemoryOS-Key": token } : {};
+    const activeToken = await getAuthToken();
+    const headers: Record<string, string> = activeToken ? { "X-MemoryOS-Key": activeToken } : {};
 
     // Check backend health
     try {
@@ -619,9 +654,18 @@ export const App: React.FC = () => {
           </div>
         </div>
       ) : (
-        /* 3. Main Views: 3D Scene, 2D Timeline Fallback, or Websites Log */
+        /* 3. Main Views: 3D Scene, 2D Timeline Fallback, Websites Log, or Apps Graph */
         <>
-          {viewMode === "WEBSITES" ? (
+          {viewMode === "APPS" ? (
+            <div className="pt-16 pb-0 h-full">
+              <AppsGraphView
+                onSelectNodeIn3D={(nodeId) => {
+                  setViewMode("JOURNEY");
+                  setHighlightedId(nodeId);
+                }}
+              />
+            </div>
+          ) : viewMode === "WEBSITES" ? (
             <div className="pt-16 pb-0 h-full">
               <WebsitesLogView
                 onFlyToDomainIn3D={handleFlyToDomainIn3D}
