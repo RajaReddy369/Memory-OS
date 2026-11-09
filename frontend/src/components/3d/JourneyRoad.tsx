@@ -221,3 +221,4 @@ export const JourneyRoad: React.FC<JourneyRoadProps> = ({
     </group>
   );
 };
+

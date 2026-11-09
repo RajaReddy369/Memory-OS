@@ -13,6 +13,7 @@ from pathlib import Path
 from backend.config import DB_PATH, DEFAULT_BLOCKED_DOMAINS
 from backend.models import EventIngestItem, SearchResultItem
 from backend.scrubber import extract_domain, is_domain_blocked, scrub_text
+from backend.search_extractor import extract_search_query
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -275,7 +276,93 @@ def insert_event(item: EventIngestItem) -> Optional[int]:
                     now
                 )
             )
-            return cursor.lastrowid
+            last_id = cursor.lastrowid
+
+            # 1. Automatic Search-Query extraction from page URLs
+            if item.event_type != "search_query" and item.url:
+                extracted = extract_search_query(item.url)
+                if extracted:
+                    query_text, engine_name = extracted
+                    sq_meta = json.dumps({
+                        "query": query_text,
+                        "engine": engine_name,
+                        "parent_event_id": last_id,
+                        "extracted_from_url": True
+                    })
+                    sq_title = f"{engine_name} Search: {query_text}"
+                    conn.execute(
+                        """
+                        INSERT INTO events (
+                            event_type, source, timestamp, url, domain, title, app_name,
+                            duration, text_content, selected_text, scroll_depth,
+                            metadata_json, content_hash, referrer_url, from_event_id,
+                            session_id, is_embedded, created_at
+                        ) VALUES ('search_query', ?, ?, ?, ?, ?, ?, 0.0, ?, NULL, 0.0, ?, NULL, ?, ?, ?, 0, ?)
+                        """,
+                        (
+                            item.source,
+                            event_timestamp,
+                            item.url,
+                            domain,
+                            sq_title,
+                            item.app_name,
+                            query_text,
+                            sq_meta,
+                            item.referrer_url,
+                            last_id,
+                            item.session_id,
+                            now
+                        )
+                    )
+
+            # 2. Capture search queries from debounced typed input in search boxes
+            if item.event_type == "typed_input" and clean_text:
+                meta = item.metadata or {}
+                elem_id = str(meta.get("elementId") or "").lower()
+                elem_name = str(meta.get("name") or "").lower()
+                is_search_box = (
+                    meta.get("type") == "search"
+                    or "search" in elem_id
+                    or "query" in elem_id
+                    or "search" in elem_name
+                    or "query" in elem_name
+                    or (domain and any(k in domain for k in ["google", "bing", "duckduckgo", "youtube", "amazon", "github", "reddit", "stackoverflow"]))
+                )
+                if is_search_box and len(clean_text) >= 2:
+                    engine_name = domain.replace("www.", "").split(".")[0].capitalize() if domain else "Search"
+                    sq_meta = json.dumps({
+                        "query": clean_text,
+                        "engine": engine_name,
+                        "parent_event_id": last_id,
+                        "typed_in_box": True
+                    })
+                    sq_title = f"{engine_name} Search: {clean_text}"
+                    conn.execute(
+                        """
+                        INSERT INTO events (
+                            event_type, source, timestamp, url, domain, title, app_name,
+                            duration, text_content, selected_text, scroll_depth,
+                            metadata_json, content_hash, referrer_url, from_event_id,
+                            session_id, is_embedded, created_at
+                        ) VALUES ('search_query', ?, ?, ?, ?, ?, ?, 0.0, ?, NULL, 0.0, ?, NULL, ?, ?, ?, 0, ?)
+                        """,
+                        (
+                            item.source,
+                            event_timestamp,
+                            item.url,
+                            domain,
+                            sq_title,
+                            item.app_name,
+                            clean_text,
+                            sq_meta,
+                            item.referrer_url,
+                            last_id,
+                            item.session_id,
+                            now
+                        )
+                    )
+
+            return last_id
     finally:
         conn.close()
 
@@ -624,6 +711,441 @@ def get_raw_events_for_period(start_time: Optional[float] = None, end_time: Opti
         ORDER BY timestamp ASC
         """, params)
         return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def backfill_search_queries() -> int:
+    """
+    Backfill search_query events from all stored page URLs across the database.
+    Idempotent: skips events that already have a corresponding search_query recorded.
+    """
+    conn = get_db_connection()
+    backfilled_count = 0
+    now = time.time()
+    try:
+        with conn:
+            cursor = conn.execute("""
+            SELECT id, source, timestamp, url, domain, title, app_name, referrer_url, from_event_id, session_id
+            FROM events
+            WHERE url IS NOT NULL AND url != '' AND event_type != 'search_query'
+            ORDER BY timestamp ASC
+            """)
+            rows = cursor.fetchall()
+            for r in rows:
+                url = r["url"]
+                if is_domain_blocked(url, DEFAULT_BLOCKED_DOMAINS):
+                    continue
+
+                extracted = extract_search_query(url)
+                if not extracted:
+                    continue
+
+                query_text, engine_name = extracted
+                # Check if search_query event already exists for this url and timestamp
+                exist_cur = conn.execute(
+                    "SELECT id FROM events WHERE event_type = 'search_query' AND url = ? AND timestamp = ?",
+                    (url, r["timestamp"])
+                )
+                if exist_cur.fetchone():
+                    continue
+
+                sq_meta = json.dumps({
+                    "query": query_text,
+                    "engine": engine_name,
+                    "parent_event_id": r["id"],
+                    "extracted_from_url": True,
+                    "backfilled": True
+                })
+                sq_title = f"{engine_name} Search: {query_text}"
+                conn.execute(
+                    """
+                    INSERT INTO events (
+                        event_type, source, timestamp, url, domain, title, app_name,
+                        duration, text_content, selected_text, scroll_depth,
+                        metadata_json, content_hash, referrer_url, from_event_id,
+                        session_id, is_embedded, created_at
+                    ) VALUES ('search_query', ?, ?, ?, ?, ?, ?, 0.0, ?, NULL, 0.0, ?, NULL, ?, ?, ?, 0, ?)
+                    """,
+                    (
+                        r["source"],
+                        r["timestamp"],
+                        url,
+                        r["domain"],
+                        sq_title,
+                        r["app_name"],
+                        query_text,
+                        sq_meta,
+                        r["referrer_url"],
+                        r["id"],
+                        r["session_id"],
+                        now
+                    )
+                )
+                backfilled_count += 1
+        return backfilled_count
+    finally:
+        conn.close()
+
+
+def get_websites_summary(
+    from_time: Optional[float] = None,
+    to_time: Optional[float] = None,
+    q: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Returns aggregated domain summary: domain, first_visit, last_visit,
+    total_visits, total_active_time, search_count, typed_count, and visited pages.
+    Excludes any blocked domains.
+    """
+    conn = get_db_connection()
+    try:
+        conditions = ["domain IS NOT NULL", "domain != ''"]
+        params: List[Any] = []
+
+        if from_time is not None:
+            conditions.append("timestamp >= ?")
+            params.append(from_time)
+        if to_time is not None:
+            conditions.append("timestamp <= ?")
+            params.append(to_time)
+        if q and q.strip():
+            pattern = f"%{q.strip().lower()}%"
+            conditions.append("(LOWER(domain) LIKE ? OR LOWER(title) LIKE ?)")
+            params.extend([pattern, pattern])
+
+        where_sql = " AND ".join(conditions)
+        sql = f"""
+        SELECT 
+            domain,
+            MIN(timestamp) as first_visit,
+            MAX(timestamp) as last_visit,
+            COUNT(CASE WHEN event_type IN ('page_visit', 'page_summary') THEN 1 END) as page_visits,
+            COUNT(*) as total_events,
+            SUM(COALESCE(duration, 0.0)) as total_active_time,
+            COUNT(CASE WHEN event_type = 'search_query' THEN 1 END) as search_count,
+            COUNT(CASE WHEN event_type = 'typed_input' THEN 1 END) as typed_count
+        FROM events
+        WHERE {where_sql}
+        GROUP BY domain
+        ORDER BY last_visit DESC;
+        """
+        cursor = conn.execute(sql, params)
+        domain_rows = cursor.fetchall()
+
+        results = []
+        for row in domain_rows:
+            domain = row["domain"]
+            if is_domain_blocked(domain, DEFAULT_BLOCKED_DOMAINS):
+                continue
+
+            page_params: List[Any] = [domain]
+            page_cond = ["domain = ?", "url IS NOT NULL", "url != ''"]
+            if from_time is not None:
+                page_cond.append("timestamp >= ?")
+                page_params.append(from_time)
+            if to_time is not None:
+                page_cond.append("timestamp <= ?")
+                page_params.append(to_time)
+
+            page_where = " AND ".join(page_cond)
+            page_cur = conn.execute(f"""
+            SELECT id, title, url, timestamp, duration, scroll_depth
+            FROM events
+            WHERE {page_where} AND event_type IN ('page_visit', 'page_summary')
+            ORDER BY timestamp DESC
+            LIMIT 50
+            """, page_params)
+
+            pages = [dict(p) for p in page_cur.fetchall()]
+
+            total_visits = row["page_visits"] if row["page_visits"] > 0 else row["total_events"]
+            results.append({
+                "domain": domain,
+                "first_visit": row["first_visit"],
+                "last_visit": row["last_visit"],
+                "total_visits": total_visits,
+                "total_active_time": round(float(row["total_active_time"] or 0.0), 1),
+                "search_count": row["search_count"],
+                "typed_count": row["typed_count"],
+                "pages": pages
+            })
+
+        return results
+    finally:
+        conn.close()
+
+
+def get_website_detail(domain: str) -> Optional[Dict[str, Any]]:
+    """
+    Returns complete chronological activity for a specific website domain:
+    pages_visited, search_queries, typed_text, highlights, and referrer navigation links.
+    """
+    clean_domain = domain.strip().lower()
+    if is_domain_blocked(clean_domain, DEFAULT_BLOCKED_DOMAINS):
+        return None
+
+    domain_variants = [clean_domain]
+    if clean_domain.startswith("www."):
+        domain_variants.append(clean_domain[4:])
+    else:
+        domain_variants.append(f"www.{clean_domain}")
+
+    conn = get_db_connection()
+    try:
+        placeholders = ",".join("?" * len(domain_variants))
+
+        cur = conn.execute(
+            f"SELECT MIN(timestamp) as first_visit, MAX(timestamp) as last_visit, SUM(COALESCE(duration, 0.0)) as total_active_time, COUNT(*) as total_events FROM events WHERE domain IN ({placeholders})",
+            domain_variants
+        )
+        stats = cur.fetchone()
+        if not stats or stats["total_events"] == 0:
+            return None
+
+        # 1. Pages visited in time order
+        pages_cur = conn.execute(
+            f"""
+            SELECT id, title, url, timestamp, duration, scroll_depth, referrer_url, from_event_id
+            FROM events
+            WHERE domain IN ({placeholders}) AND event_type IN ('page_visit', 'page_summary')
+            ORDER BY timestamp ASC
+            """,
+            domain_variants
+        )
+        pages_visited = [dict(r) for r in pages_cur.fetchall()]
+
+        # 2. Search queries on this domain
+        sq_cur = conn.execute(
+            f"""
+            SELECT id, text_content as query, metadata_json, timestamp, url
+            FROM events
+            WHERE domain IN ({placeholders}) AND event_type = 'search_query'
+            ORDER BY timestamp ASC
+            """,
+            domain_variants
+        )
+        search_queries = []
+        for r in sq_cur.fetchall():
+            item = dict(r)
+            meta = {}
+            if r["metadata_json"]:
+                try:
+                    meta = json.loads(r["metadata_json"])
+                except Exception:
+                    pass
+            item["engine"] = meta.get("engine", "Search")
+            search_queries.append(item)
+
+        # 3. Typed text snippets (scrubbed)
+        typed_cur = conn.execute(
+            f"""
+            SELECT id, text_content as text, metadata_json, timestamp, url
+            FROM events
+            WHERE domain IN ({placeholders}) AND event_type = 'typed_input'
+            ORDER BY timestamp ASC
+            """,
+            domain_variants
+        )
+        typed_text = [dict(r) for r in typed_cur.fetchall()]
+
+        # 4. Text highlights / selections
+        hl_cur = conn.execute(
+            f"""
+            SELECT id, selected_text as text, timestamp, url
+            FROM events
+            WHERE domain IN ({placeholders}) AND event_type = 'text_select'
+            ORDER BY timestamp ASC
+            """,
+            domain_variants
+        )
+        highlights = [dict(r) for r in hl_cur.fetchall()]
+
+        # 5. Referrer / navigation links (came from and went to next)
+        navigation_links = []
+
+        ref_cur = conn.execute(
+            f"""
+            SELECT id, referrer_url, url, timestamp
+            FROM events
+            WHERE domain IN ({placeholders}) AND referrer_url IS NOT NULL AND referrer_url != ''
+            ORDER BY timestamp ASC
+            """,
+            domain_variants
+        )
+        for r in ref_cur.fetchall():
+            raw_ref = extract_domain(r["referrer_url"])
+            ref_domain = raw_ref.replace("www.", "") if raw_ref else ""
+            if ref_domain and ref_domain not in [d.replace("www.", "") for d in domain_variants] and not is_domain_blocked(ref_domain, DEFAULT_BLOCKED_DOMAINS):
+                navigation_links.append({
+                    "type": "came_from",
+                    "from_domain": ref_domain,
+                    "to_domain": clean_domain.replace("www.", ""),
+                    "referrer_url": r["referrer_url"],
+                    "target_url": r["url"],
+                    "timestamp": r["timestamp"]
+                })
+
+        next_cur = conn.execute(
+            f"""
+            SELECT id, domain, url, referrer_url, timestamp
+            FROM events
+            WHERE domain NOT IN ({placeholders}) AND referrer_url IS NOT NULL AND referrer_url != ''
+            ORDER BY timestamp ASC
+            """,
+            domain_variants
+        )
+        for r in next_cur.fetchall():
+            raw_ref = extract_domain(r["referrer_url"])
+            ref_dom = raw_ref.replace("www.", "") if raw_ref else ""
+            clean_target = (r["domain"] or "").replace("www.", "")
+            if ref_dom in [d.replace("www.", "") for d in domain_variants] and not is_domain_blocked(clean_target, DEFAULT_BLOCKED_DOMAINS):
+                navigation_links.append({
+                    "type": "went_to",
+                    "from_domain": clean_domain.replace("www.", ""),
+                    "to_domain": clean_target,
+                    "referrer_url": r["referrer_url"],
+                    "target_url": r["url"],
+                    "timestamp": r["timestamp"]
+                })
+
+        navigation_links.sort(key=lambda x: x["timestamp"])
+
+        return {
+            "domain": clean_domain,
+            "first_visit": stats["first_visit"],
+            "last_visit": stats["last_visit"],
+            "total_visits": len(pages_visited) if pages_visited else stats["total_events"],
+            "total_active_time": round(float(stats["total_active_time"] or 0.0), 1),
+            "pages_visited": pages_visited,
+            "search_queries": search_queries,
+            "typed_text": typed_text,
+            "highlights": highlights,
+            "navigation_links": navigation_links
+        }
+    finally:
+        conn.close()
+
+
+def delete_website_history(domain: str) -> int:
+    """
+    Deletes all activity events for a specific domain from SQLite and FTS5.
+    Returns the count of deleted events.
+    """
+    clean_domain = domain.strip().lower()
+    domain_variants = [clean_domain]
+    if clean_domain.startswith("www."):
+        domain_variants.append(clean_domain[4:])
+    else:
+        domain_variants.append(f"www.{clean_domain}")
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            placeholders = ",".join("?" * len(domain_variants))
+            cur = conn.execute(
+                f"SELECT id FROM events WHERE domain IN ({placeholders})",
+                domain_variants
+            )
+            event_ids = [r["id"] for r in cur.fetchall()]
+            if not event_ids:
+                return 0
+
+            id_placeholders = ",".join("?" * len(event_ids))
+            conn.execute(
+                f"DELETE FROM session_events WHERE event_id IN ({id_placeholders})",
+                event_ids
+            )
+            conn.execute(
+                f"DELETE FROM events WHERE id IN ({id_placeholders})",
+                event_ids
+            )
+            return len(event_ids)
+    finally:
+        conn.close()
+
+
+def get_all_searches(
+    domain: Optional[str] = None,
+    q: Optional[str] = None,
+    from_time: Optional[float] = None,
+    to_time: Optional[float] = None,
+    limit: int = 500
+) -> List[Dict[str, Any]]:
+    """
+    Retrieve all search queries across every site in chronological order.
+    Optionally filters by domain, query text, or time bounds.
+    """
+    conn = get_db_connection()
+    try:
+        conditions = ["event_type = 'search_query'"]
+        params: List[Any] = []
+
+        if domain and domain.strip():
+            clean_dom = domain.strip().lower()
+            conditions.append("(LOWER(domain) = ? OR LOWER(domain) = ?)")
+            params.extend([clean_dom, f"www.{clean_dom}"])
+
+        if q and q.strip():
+            conditions.append("LOWER(text_content) LIKE ?")
+            params.append(f"%{q.strip().lower()}%")
+
+        if from_time is not None:
+            conditions.append("timestamp >= ?")
+            params.append(from_time)
+
+        if to_time is not None:
+            conditions.append("timestamp <= ?")
+            params.append(to_time)
+
+        where_sql = " AND ".join(conditions)
+        params.append(limit)
+
+        sql = f"""
+        SELECT id, text_content as query, domain, url, title, timestamp, metadata_json, from_event_id
+        FROM events
+        WHERE {where_sql}
+        ORDER BY timestamp DESC
+        LIMIT ?;
+        """
+        cursor = conn.execute(sql, params)
+        rows = cursor.fetchall()
+
+        results = []
+        for r in rows:
+            if is_domain_blocked(r["domain"] or "", DEFAULT_BLOCKED_DOMAINS):
+                continue
+
+            meta = {}
+            if r["metadata_json"]:
+                try:
+                    meta = json.loads(r["metadata_json"])
+                except Exception:
+                    pass
+
+            result_page = None
+            parent_id = r["from_event_id"] or meta.get("parent_event_id")
+            if parent_id:
+                p_cur = conn.execute(
+                    "SELECT title, url FROM events WHERE id = ? AND event_type IN ('page_visit', 'page_summary')",
+                    (parent_id,)
+                )
+                p_row = p_cur.fetchone()
+                if p_row:
+                    result_page = {"title": p_row["title"], "url": p_row["url"]}
+
+            results.append({
+                "id": r["id"],
+                "query": r["query"],
+                "engine": meta.get("engine", "Search"),
+                "domain": r["domain"],
+                "url": r["url"],
+                "title": r["title"],
+                "timestamp": r["timestamp"],
+                "result_page": result_page
+            })
+
+        return results
     finally:
         conn.close()
 

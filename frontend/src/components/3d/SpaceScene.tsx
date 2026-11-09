@@ -171,3 +171,4 @@ export const SpaceScene: React.FC<SpaceSceneProps> = ({
     </div>
   );
 };
+

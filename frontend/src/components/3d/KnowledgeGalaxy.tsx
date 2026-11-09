@@ -110,3 +110,4 @@ export const KnowledgeGalaxy: React.FC<KnowledgeGalaxyProps> = ({
     </group>
   );
 };
+

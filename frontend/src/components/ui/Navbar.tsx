@@ -107,6 +107,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           <ListTree className="w-4 h-4" />
           2D Timeline
         </button>
+
+        <button
+          onClick={() => onSetViewMode("WEBSITES")}
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+            viewMode === "WEBSITES"
+              ? "bg-cyan-400 text-slate-950 shadow-md shadow-cyan-400/30"
+              : "text-slate-300 hover:text-white hover:bg-slate-800/60"
+          }`}
+        >
+          <Globe2 className="w-4 h-4" />
+          Websites Log
+        </button>
       </div>
 
       {/* 3. Search Bar, Zoom Stepper & Reset Controls */}
@@ -170,3 +182,4 @@ export const Navbar: React.FC<NavbarProps> = ({
     </header>
   );
 };
+

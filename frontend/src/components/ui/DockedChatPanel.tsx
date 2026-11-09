@@ -212,3 +212,4 @@ export const DockedChatPanel: React.FC<DockedChatPanelProps> = ({
     </div>
   );
 };
+

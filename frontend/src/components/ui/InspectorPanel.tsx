@@ -11,24 +11,90 @@ import {
   Code2,
   Bookmark,
   Share2,
+  Globe,
+  Box,
 } from "lucide-react";
-import { PageNode, SessionNode, ViewMode } from "../../types";
+import { GalaxyNode, PageNode, SessionNode } from "../../types";
 
 interface InspectorPanelProps {
   session: SessionNode | null;
   selectedPage: PageNode | null;
+  galaxyNode?: GalaxyNode | null;
   isReplaying: boolean;
   onClose: () => void;
   onSwitchTo2D: (sessionId: string) => void;
+  onOpenWebsites?: (domain: string) => void;
 }
 
 export const InspectorPanel: React.FC<InspectorPanelProps> = ({
   session,
   selectedPage,
+  galaxyNode,
   isReplaying,
   onClose,
   onSwitchTo2D,
+  onOpenWebsites,
 }) => {
+  if (!session && !galaxyNode) return null;
+
+  // Render for Galaxy Domain Node
+  if (!session && galaxyNode) {
+    return (
+      <aside className="absolute top-16 right-5 bottom-20 w-96 z-20 bg-slate-900/90 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-right duration-200">
+        <div className="p-4 border-b border-slate-800/80 flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" />
+              <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-cyan-500/40 text-cyan-300 bg-cyan-950/30">
+                {galaxyNode.type}
+              </span>
+            </div>
+            <h2 className="text-base font-bold text-white leading-tight flex items-center gap-2">
+              <Globe className="w-4 h-4 text-cyan-400" />
+              {galaxyNode.name}
+            </h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+          <p className="text-slate-300 leading-relaxed">{galaxyNode.details}</p>
+
+          <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2">
+            <span className="text-[10px] font-mono uppercase text-slate-500 tracking-wider">
+              Galaxy Node Information
+            </span>
+            <div className="flex justify-between font-mono text-[11px] text-slate-300">
+              <span>Category</span>
+              <span className="capitalize text-cyan-300">{galaxyNode.type}</span>
+            </div>
+            <div className="flex justify-between font-mono text-[11px] text-slate-300">
+              <span>Connections</span>
+              <span>{galaxyNode.connections.length} linked hubs</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-3 bg-slate-950/80 border-t border-slate-800/80 space-y-2">
+          {onOpenWebsites && (
+            <button
+              onClick={() => onOpenWebsites(galaxyNode.name)}
+              className="w-full flex items-center justify-center gap-2 py-2 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-cyan-900/30 transition-all"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              Open Full Websites & Search Log
+            </button>
+          )}
+        </div>
+      </aside>
+    );
+  }
+
   if (!session) return null;
 
   return (
@@ -208,8 +274,17 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
         )}
       </div>
 
-      {/* 3. Footer Action: Open in 2D Timeline */}
-      <div className="p-3 bg-slate-950/80 border-t border-slate-800/80">
+      {/* 3. Footer Action: Open in 2D Timeline & Website Log */}
+      <div className="p-3 bg-slate-950/80 border-t border-slate-800/80 space-y-2">
+        {onOpenWebsites && session.primaryDomain && (
+          <button
+            onClick={() => onOpenWebsites(session.primaryDomain)}
+            className="w-full flex items-center justify-center gap-2 py-2 bg-cyan-950/40 hover:bg-cyan-900/60 text-cyan-300 rounded-xl text-xs font-semibold transition-all border border-cyan-800/40"
+          >
+            <Globe className="w-3.5 h-3.5 text-cyan-400" />
+            View {session.primaryDomain} Log
+          </button>
+        )}
         <button
           onClick={() => onSwitchTo2D(session.id)}
           className="w-full flex items-center justify-center gap-2 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition-all border border-slate-700"
@@ -221,3 +296,4 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
     </aside>
   );
 };
+

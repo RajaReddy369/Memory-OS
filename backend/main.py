@@ -15,12 +15,17 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from backend.config import API_TOKEN, CORS_ORIGIN_REGEX, DATA_DIR, DB_PATH, HOST, OLLAMA_HOST, PORT
 from backend.database import (
+    backfill_search_queries,
+    delete_website_history,
+    get_all_searches,
     get_db_connection,
     get_event_count,
     get_projects,
     get_recent_events,
     get_session_by_id,
     get_sessions,
+    get_website_detail,
+    get_websites_summary,
     init_db,
     insert_event,
     insert_events_batch,
@@ -51,6 +56,12 @@ logger = logging.getLogger("memoryos")
 async def lifespan(app: FastAPI):
     """Lifecycle manager for database initialization, worker startup, and cleanup."""
     init_db()
+    try:
+        backfilled = backfill_search_queries()
+        if backfilled > 0:
+            logger.info(f"Backfilled {backfilled} search query events from existing URLs")
+    except Exception as e:
+        logger.warning(f"Search backfill warning: {e}")
     start_worker()
     logger.info(f"MemoryOS started on {HOST}:{PORT}")
     logger.info(f"Data directory: {DATA_DIR}")
@@ -79,7 +90,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -432,6 +443,87 @@ async def websocket_endpoint(
         active_websockets.discard(websocket)
     except Exception:
         active_websockets.discard(websocket)
+
+
+# ==============================================================================
+# Websites & Search Query Log Endpoints
+# ==============================================================================
+
+@app.get("/api/websites")
+async def get_websites_endpoint(
+    from_time: Optional[float] = Query(None, alias="from"),
+    to_time: Optional[float] = Query(None, alias="to"),
+    q: Optional[str] = Query(None),
+    _: None = Security(verify_api_key)
+):
+    """
+    Retrieve aggregated activity records per visited website domain.
+    Returns: domain, first_visit, last_visit, total_visits, total_active_time, and pages visited.
+    """
+    return get_websites_summary(from_time=from_time, to_time=to_time, q=q)
+
+
+@app.get("/api/websites/{domain:path}")
+async def get_website_detail_endpoint(
+    domain: str,
+    _: None = Security(verify_api_key)
+):
+    """
+    Retrieve full chronological activity log for a specific website domain:
+    pages visited, search queries, typed text (scrubbed), highlights, and referrer navigation links.
+    """
+    detail = get_website_detail(domain)
+    if not detail:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No activity records found for domain '{domain}' or domain is restricted."
+        )
+    return detail
+
+
+@app.delete("/api/websites/{domain:path}")
+async def delete_website_endpoint(
+    domain: str,
+    _: None = Security(verify_api_key)
+):
+    """
+    Delete all activity records for a specific website domain across events and FTS5.
+    """
+    count = delete_website_history(domain)
+    return {
+        "status": "success",
+        "domain": domain,
+        "deleted_count": count
+    }
+
+
+@app.post("/api/websites/backfill")
+async def backfill_websites_endpoint(
+    _: None = Security(verify_api_key)
+):
+    """
+    Run extraction of search queries over existing page visit URLs in database.
+    """
+    count = backfill_search_queries()
+    return {
+        "status": "success",
+        "backfilled_count": count
+    }
+
+
+@app.get("/api/searches")
+async def get_searches_endpoint(
+    domain: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+    from_time: Optional[float] = Query(None, alias="from"),
+    to_time: Optional[float] = Query(None, alias="to"),
+    limit: int = Query(500),
+    _: None = Security(verify_api_key)
+):
+    """
+    Retrieve all search queries across every visited website in a unified chronological timeline.
+    """
+    return get_all_searches(domain=domain, q=q, from_time=from_time, to_time=to_time, limit=limit)
 
 
 def main():

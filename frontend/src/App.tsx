@@ -21,6 +21,7 @@ import { InspectorPanel } from "./components/ui/InspectorPanel";
 import { DockedChatPanel } from "./components/ui/DockedChatPanel";
 import { ReplayController } from "./components/ui/ReplayController";
 import { TwoDTimelineFallback } from "./components/ui/TwoDTimelineFallback";
+import { WebsitesLogView } from "./components/ui/WebsitesLogView";
 
 export const App: React.FC = () => {
   // 1. Data state
@@ -44,6 +45,7 @@ export const App: React.FC = () => {
   const [selectedGalaxyNode, setSelectedGalaxyNode] = useState<GalaxyNode | null>(null);
   const [selectedCityDay, setSelectedCityDay] = useState<CityDayTower | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [websitesInitialDomain, setWebsitesInitialDomain] = useState<string | null>(null);
 
   // 4. Camera target position
   const [cameraTargetPos, setCameraTargetPos] = useState<[number, number, number] | null>(null);
@@ -145,8 +147,31 @@ export const App: React.FC = () => {
 
   const handleSelectGalaxyNode = (node: GalaxyNode) => {
     setSelectedGalaxyNode(node);
+    setSelectedSession(null);
+    setSelectedPage(null);
     setCameraTargetPos(node.position);
     setHighlightedId(node.id);
+  };
+
+  const handleFlyToDomainIn3D = (domain: string) => {
+    setViewMode("GALAXY");
+    const clean = domain.toLowerCase().replace("www.", "");
+    const found = galaxyNodes.find(
+      (n) => n.name.toLowerCase().includes(clean) || clean.includes(n.name.toLowerCase().replace("www.", ""))
+    );
+    if (found) {
+      setSelectedGalaxyNode(found);
+      setSelectedSession(null);
+      setCameraTargetPos(found.position);
+      setHighlightedId(found.id);
+    } else {
+      const sess = sessions.find((s) => s.primaryDomain.toLowerCase().includes(clean));
+      if (sess) {
+        setViewMode("JOURNEY");
+        setSelectedSession(sess);
+        setCameraTargetPos(sess.position3D);
+      }
+    }
   };
 
   const handleSelectCityDay = (tower: CityDayTower) => {
@@ -216,8 +241,15 @@ export const App: React.FC = () => {
         onResetCamera={handleResetCamera}
       />
 
-      {/* 2. Main Canvas or 2D View */}
-      {viewMode === "2D_TIMELINE" ? (
+      {/* 2. Main Canvas, 2D View, or Websites Log View */}
+      {viewMode === "WEBSITES" ? (
+        <div className="pt-16 pb-0 h-full">
+          <WebsitesLogView
+            onFlyToDomainIn3D={handleFlyToDomainIn3D}
+            initialDomain={websitesInitialDomain}
+          />
+        </div>
+      ) : viewMode === "2D_TIMELINE" ? (
         <div className="pt-16 pb-8 h-full">
           <TwoDTimelineFallback
             sessions={filteredSessions}
@@ -271,12 +303,18 @@ export const App: React.FC = () => {
       <InspectorPanel
         session={selectedSession}
         selectedPage={selectedPage}
+        galaxyNode={selectedGalaxyNode}
         isReplaying={isReplaying}
         onClose={() => {
           setSelectedSession(null);
           setSelectedPage(null);
+          setSelectedGalaxyNode(null);
         }}
         onSwitchTo2D={handleSwitchTo2D}
+        onOpenWebsites={(dom) => {
+          setWebsitesInitialDomain(dom);
+          setViewMode("WEBSITES");
+        }}
       />
 
       {/* 6. Hover Tooltip */}
@@ -294,3 +332,4 @@ export const App: React.FC = () => {
 };
 
 export default App;
+

@@ -1,4 +1,4 @@
-export type ViewMode = "JOURNEY" | "GALAXY" | "CITY" | "2D_TIMELINE";
+export type ViewMode = "JOURNEY" | "GALAXY" | "CITY" | "2D_TIMELINE" | "WEBSITES";
 
 export type ZoomLevel = "YEAR" | "MONTH" | "DAY" | "SESSION" | "PAGE" | "ACTION";
 
@@ -104,3 +104,83 @@ export interface CitationReference {
   snippet: string;
   score?: number;
 }
+
+export interface WebsitePageItem {
+  id: number;
+  title: string;
+  url: string;
+  timestamp: number;
+  duration: number;
+  scroll_depth?: number;
+}
+
+export interface WebsiteSearchQueryItem {
+  id: number;
+  query: string;
+  engine: string;
+  timestamp: number;
+  url: string;
+}
+
+export interface WebsiteTypedItem {
+  id: number;
+  text: string;
+  timestamp: number;
+  url: string;
+}
+
+export interface WebsiteHighlightItem {
+  id: number;
+  text: string;
+  timestamp: number;
+  url: string;
+}
+
+export interface WebsiteNavigationLink {
+  type: "came_from" | "went_to";
+  from_domain: string;
+  to_domain: string;
+  referrer_url: string;
+  target_url: string;
+  timestamp: number;
+}
+
+export interface WebsiteSummaryItem {
+  domain: string;
+  first_visit: number;
+  last_visit: number;
+  total_visits: number;
+  total_active_time: number;
+  search_count: number;
+  typed_count: number;
+  pages: WebsitePageItem[];
+}
+
+export interface WebsiteDetail {
+  domain: string;
+  first_visit: number;
+  last_visit: number;
+  total_visits: number;
+  total_active_time: number;
+  pages_visited: WebsitePageItem[];
+  search_queries: WebsiteSearchQueryItem[];
+  typed_text: WebsiteTypedItem[];
+  highlights: WebsiteHighlightItem[];
+  navigation_links: WebsiteNavigationLink[];
+}
+
+export interface SearchTimelineItem {
+  id: number;
+  query: string;
+  engine: string;
+  domain: string;
+  url: string;
+  title: string;
+  timestamp: number;
+  result_page?: {
+    title: string;
+    url: string;
+  } | null;
+}
+
+
