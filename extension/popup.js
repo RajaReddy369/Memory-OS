@@ -2,6 +2,8 @@
  * MemoryOS Popup Controller
  */
 
+import { importBrowserHistory } from "./history_importer.js";
+
 document.addEventListener("DOMContentLoaded", async () => {
   const pauseToggle = document.getElementById("pause-toggle");
   const recordingDesc = document.getElementById("recording-desc");
@@ -12,6 +14,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   const muteDomainBtn = document.getElementById("mute-domain-btn");
   const apiKeyInput = document.getElementById("api-key-input");
   const saveTokenBtn = document.getElementById("save-token-btn");
+
+  const openWorldBtn = document.getElementById("open-world-btn");
+  const openSidepanelBtn = document.getElementById("open-sidepanel-btn");
+  const importHistoryBtn = document.getElementById("import-history-btn");
+  const importRangeSelect = document.getElementById("import-range-select");
+  const importProgressStatus = document.getElementById("import-progress-status");
 
   let currentDomain = "";
   const API_URL = "http://127.0.0.1:8000";
@@ -47,7 +55,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     domainNameEl.textContent = "—";
   }
 
-  // 3. Check Backend Connectivity
+  // 3. Check Backend Connectivity and Live Stats
   async function checkBackend() {
     try {
       const res = await fetch(`${API_URL}/api/health`, { method: "GET" });
@@ -55,6 +63,16 @@ document.addEventListener("DOMContentLoaded", async () => {
         backendStatus.textContent = "Online";
         backendStatus.className = "status-badge online";
         connectionIndicator.textContent = "Connected (127.0.0.1:8000)";
+
+        // Fetch live database metrics
+        const token = apiKeyInput.value.trim();
+        const sumRes = await fetch(`${API_URL}/api/data/summary`, {
+          headers: token ? { "X-MemoryOS-Key": token } : {}
+        });
+        if (sumRes.ok) {
+          const sumData = await sumRes.json();
+          eventCountEl.textContent = sumData.total_events;
+        }
       } else {
         throw new Error("HTTP " + res.status);
       }
@@ -66,22 +84,62 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   checkBackend();
 
-  // 4. Handle Instant Pause Toggle
+  // 4. Open 3D World in Full Tab
+  openWorldBtn.addEventListener("click", () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL("world.html") });
+  });
+
+  // 5. Open Side Panel
+  openSidepanelBtn.addEventListener("click", async () => {
+    if (chrome.sidePanel && chrome.sidePanel.open) {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab && tab.id) {
+          await chrome.sidePanel.open({ tabId: tab.id });
+          return;
+        }
+      } catch (e) {
+        console.warn("sidePanel.open failed, falling back to tab", e);
+      }
+    }
+    chrome.tabs.create({ url: chrome.runtime.getURL("sidepanel.html") });
+  });
+
+  // 6. Import Browser History
+  importHistoryBtn.addEventListener("click", async () => {
+    const daysBack = parseInt(importRangeSelect.value, 10) || 30;
+    importHistoryBtn.disabled = true;
+    importProgressStatus.textContent = "Requesting permission...";
+
+    try {
+      const result = await importBrowserHistory(
+        { daysBack, maxResults: 5000 },
+        (p) => {
+          importProgressStatus.textContent = p.message || `Processing (${p.current || 0})...`;
+        }
+      );
+      importProgressStatus.textContent = `Done! Imported ${result.count} visits.`;
+      checkBackend();
+    } catch (err) {
+      importProgressStatus.textContent = `Error: ${err.message}`;
+    } finally {
+      importHistoryBtn.disabled = false;
+    }
+  });
+
+  // 7. Handle Instant Pause Toggle
   pauseToggle.addEventListener("change", async () => {
     const active = pauseToggle.checked;
     await chrome.storage.local.set({ isRecordingPaused: !active });
     updateRecordingUI(active);
 
-    // Sync with backend if online
     const token = apiKeyInput.value.trim();
     try {
       await fetch(`${API_URL}/api/recording/toggle?paused=${!active}`, {
         method: "POST",
         headers: token ? { "X-MemoryOS-Key": token } : {}
       });
-    } catch (e) {
-      // Backend may be offline, local setting persists regardless
-    }
+    } catch (e) {}
   });
 
   function updateRecordingUI(active) {
@@ -94,7 +152,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // 5. Handle Mute Domain
+  // 8. Handle Mute Domain
   muteDomainBtn.addEventListener("click", async () => {
     if (!currentDomain) return;
     const data = await chrome.storage.local.get(["userBlocklist"]);
@@ -107,7 +165,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // 6. Handle Save Token
+  // 9. Handle Save Token
   saveTokenBtn.addEventListener("click", async () => {
     const token = apiKeyInput.value.trim();
     await chrome.storage.local.set({ apiKey: token });
@@ -118,4 +176,3 @@ document.addEventListener("DOMContentLoaded", async () => {
     checkBackend();
   });
 });
-

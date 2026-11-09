@@ -15,6 +15,25 @@
       <div id="backend-status" class="status-badge offline">Offline</div>
     </header>
 
+    <!-- Navigation Launchers -->
+    <div class="nav-buttons">
+      <button id="open-world-btn" class="action-btn primary-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+          <polyline points="2 17 12 22 22 17"></polyline>
+          <polyline points="2 12 12 17 22 12"></polyline>
+        </svg>
+        Open 3D World
+      </button>
+      <button id="open-sidepanel-btn" class="action-btn secondary-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="15" y1="3" x2="15" y2="21"></line>
+        </svg>
+        Side Panel
+      </button>
+    </div>
+
     <!-- Instant Pause Toggle -->
     <div class="control-card">
       <div class="control-label">
@@ -27,16 +46,35 @@
       </label>
     </div>
 
-    <!-- Quick Stats -->
+    <!-- Live Data Stats -->
     <div class="stats-row">
       <div class="stat-card">
         <span class="stat-number" id="event-count">0</span>
-        <span class="stat-title">Buffered Events</span>
+        <span class="stat-title" id="event-count-title">Saved Events</span>
       </div>
       <div class="stat-card">
         <span class="stat-number" id="domain-name">—</span>
-        <span class="stat-title">Current Domain</span>
+        <span class="stat-title">Current Tab</span>
       </div>
+    </div>
+
+    <!-- History Importer Card -->
+    <div class="importer-card">
+      <div class="importer-header">
+        <span class="importer-title">Bootstrap Memory</span>
+        <span id="import-badge" class="mini-badge">Edge / Chrome</span>
+      </div>
+      <div class="importer-controls">
+        <select id="import-range-select" class="select-input">
+          <option value="7">Last 7 days</option>
+          <option value="30" selected>Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+        <button id="import-history-btn" class="action-btn cyan-btn">
+          Import History
+        </button>
+      </div>
+      <div id="import-progress-status" class="import-status"></div>
     </div>
 
     <!-- Domain Block Button -->
@@ -60,7 +98,6 @@
       <span id="connection-indicator">Checking backend...</span>
     </footer>
   </div>
-  <script src="popup.js"></script>
+  <script type="module" src="popup.js"></script>
 </body>
 </html>
-

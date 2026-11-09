@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MemoryOS Side Panel</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="sidepanel-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <span class="logo-dot"></span>
+        <h2>MemoryOS</h2>
+      </div>
+      <div class="header-actions">
+        <button id="open-world-btn" class="icon-btn" title="Open 3D World in Full Tab">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+        </button>
+        <span id="backend-indicator" class="status-pill offline">Offline</span>
+      </div>
+    </header>
+
+    <!-- Tab navigation: Chat vs Recent Activity -->
+    <nav class="tabs">
+      <button id="tab-chat" class="tab active">Memory Chat</button>
+      <button id="tab-activity" class="tab">Recent Feed</button>
+    </nav>
+
+    <!-- Chat Tab Content -->
+    <section id="chat-section" class="section active">
+      <div id="chat-history" class="chat-history">
+        <div class="chat-bubble ai">
+          <p>Hello! I am your MemoryOS copilot. Ask me anything about what you read, searched, or coded.</p>
+        </div>
+      </div>
+
+      <form id="chat-form" class="chat-input-bar">
+        <input
+          type="text"
+          id="chat-input"
+          placeholder="Ask memory (e.g. 'What was that article on RAG yesterday?')"
+          autocomplete="off"
+        />
+        <button type="submit" id="chat-submit" class="send-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </form>
+    </section>
+
+    <!-- Activity Tab Content -->
+    <section id="activity-section" class="section">
+      <div class="activity-header">
+        <span>Recent Digital Activity</span>
+        <button id="refresh-activity-btn" class="text-btn">Refresh</button>
+      </div>
+      <div id="activity-list" class="activity-list">
+        <div class="empty-state">Loading recent events...</div>
+      </div>
+    </section>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

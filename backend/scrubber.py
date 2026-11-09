@@ -27,8 +27,8 @@ PATTERNS = [
     (re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b|\b3[47]\d{13}\b"), "[REDACTED_CARD_NUMBER]"),
     # US Social Security Number
     (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[REDACTED_SSN]"),
-    # Generic passwords in URL params or key-value structures
-    (re.compile(r"(?i)(password|passwd|pwd|secret|api_key|apikey|access_token|auth_token)\s*[:=]\s*['\"]?([^\s'\";&]{4,})['\"]?"), r"\1=[REDACTED]"),
+    # Generic passwords in URL params or key-value structures (ignoring already redacted tokens)
+    (re.compile(r"(?i)(password|passwd|pwd|secret|api_key|apikey|token|access_token|auth_token)\s*[:=]\s*['\"]?(?!\[REDACTED)([^\s'\";&]{4,})['\"]?"), r"\1=[REDACTED]"),
     # OTP / 2FA verification codes
     (re.compile(r"(?i)\b(otp|verification\s*code|security\s*code)\b[\s:=]+([0-9]{4,8})\b"), r"\1=[REDACTED_OTP]"),
 ]

@@ -75,40 +75,22 @@ export const DockedChatPanel: React.FC<DockedChatPanelProps> = ({
         // Automatically light up the first cited node in 3D
         if (data.citations && data.citations.length > 0) {
           const firstCit = data.citations[0];
-          onHighlight3DNode(`sess_${firstCit.event_id % 70}`);
+          onHighlight3DNode(`event_${firstCit.event_id}`);
         }
       } else {
-        throw new Error("Backend offline");
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server returned HTTP ${res.status}`);
       }
-    } catch {
-      // Fallback demo response for standalone prototype review
-      setTimeout(() => {
-        const demoCitations: CitationReference[] = [
-          {
-            event_id: 14,
-            title: "Chroma Getting Started Guide",
-            url: "https://docs.trychroma.com/getting-started",
-            domain: "docs.trychroma.com",
-            timestamp: Date.now() / 1000 - 86400,
-            time_str: "Yesterday afternoon",
-            snippet: "Chroma is the AI-native open-source embedding database for RAG apps.",
-            score: 0.94,
-          },
-        ];
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `ai_${Date.now()}`,
-            sender: "ai",
-            text: `Based on your memory, you explored Chroma vector database while working on the RAG pipeline yesterday afternoon.`,
-            citations: demoCitations,
-          },
-        ]);
-
-        // Light up matching 3D node
-        onHighlight3DNode("sess_14");
-      }, 700);
+    } catch (err: any) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `ai_${Date.now()}`,
+          sender: "ai",
+          text: `⚠️ MemoryOS backend unreachable (${err?.message || "connection failed"}). Ensure the FastAPI server is running at http://127.0.0.1:8000.`,
+          citations: [],
+        },
+      ]);
     } finally {
       setIsLoading(false);
     }

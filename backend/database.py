@@ -5,6 +5,7 @@ Enables high-performance local structured storage, keyword search, and referrer 
 
 import hashlib
 import json
+import math
 import sqlite3
 import time
 from typing import Any, Dict, List, Optional
@@ -1146,6 +1147,73 @@ def get_all_searches(
             })
 
         return results
+    finally:
+        conn.close()
+
+
+def get_data_summary() -> Dict[str, Any]:
+    """Retrieve event counts by source, first and last timestamp, and number of sites/apps/files."""
+    conn = get_db_connection()
+    try:
+        cur = conn.execute("""
+        SELECT 
+            COUNT(*) as total_events,
+            MIN(timestamp) as first_timestamp,
+            MAX(timestamp) as last_timestamp,
+            COUNT(DISTINCT domain) as total_domains,
+            COUNT(DISTINCT app_name) as total_apps
+        FROM events;
+        """)
+        row = cur.fetchone()
+        total_events = row["total_events"] if row else 0
+        first_ts = row["first_timestamp"] if row and row["first_timestamp"] else None
+        last_ts = row["last_timestamp"] if row and row["last_timestamp"] else None
+
+        date_span_days = 0
+        if first_ts and last_ts:
+            date_span_days = max(1, math.ceil((last_ts - first_ts) / 86400.0))
+
+        # Counts by source
+        src_cur = conn.execute("SELECT source, COUNT(*) as cnt FROM events GROUP BY source;")
+        sources = {r["source"]: r["cnt"] for r in src_cur.fetchall()}
+
+        # Counts for standard sources (ensuring zeros present)
+        for s in ["extension_live", "edge_history", "desktop_agent", "vscode", "chatbot"]:
+            if s not in sources:
+                sources[s] = 0
+
+        # Total files touched count
+        file_cur = conn.execute("SELECT COUNT(*) FROM events WHERE event_type LIKE 'file_%';")
+        total_files = file_cur.fetchone()[0]
+
+        return {
+            "total_events": total_events,
+            "first_timestamp": first_ts,
+            "last_timestamp": last_ts,
+            "date_span_days": date_span_days,
+            "total_domains": row["total_domains"] if row else 0,
+            "total_apps": row["total_apps"] if row else 0,
+            "total_files": total_files,
+            "sources": sources
+        }
+    finally:
+        conn.close()
+
+
+def delete_events_by_source(source: str) -> int:
+    """Bulk delete all events associated with a specific source (e.g. edge_history)."""
+    conn = get_db_connection()
+    try:
+        with conn:
+            cur = conn.execute("SELECT id FROM events WHERE source = ?", (source,))
+            event_ids = [r["id"] for r in cur.fetchall()]
+            if not event_ids:
+                return 0
+
+            id_placeholders = ",".join("?" * len(event_ids))
+            conn.execute(f"DELETE FROM session_events WHERE event_id IN ({id_placeholders})", event_ids)
+            conn.execute(f"DELETE FROM events WHERE id IN ({id_placeholders})", event_ids)
+            return len(event_ids)
     finally:
         conn.close()
 

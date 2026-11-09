@@ -10,8 +10,9 @@ import {
   Layers,
   Calendar,
   Filter,
+  Upload,
 } from "lucide-react";
-import { Project, ViewMode, ZoomLevel } from "../../types";
+import { Project, ViewMode, ZoomLevel, DataSummary } from "../../types";
 
 interface NavbarProps {
   viewMode: ViewMode;
@@ -19,11 +20,13 @@ interface NavbarProps {
   projects: Project[];
   selectedProjectId: string | null;
   searchQuery: string;
+  dataSummary?: DataSummary | null;
   onSetViewMode: (mode: ViewMode) => void;
   onSetZoomLevel: (level: ZoomLevel) => void;
   onSelectProject: (projId: string | null) => void;
   onSearchChange: (q: string) => void;
   onResetCamera: () => void;
+  onOpenHistoryImport?: () => void;
 }
 
 const ZOOM_STEPS: ZoomLevel[] = ["YEAR", "MONTH", "DAY", "SESSION", "PAGE", "ACTION"];
@@ -34,15 +37,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   projects,
   selectedProjectId,
   searchQuery,
+  dataSummary,
   onSetViewMode,
   onSetZoomLevel,
   onSelectProject,
   onSearchChange,
   onResetCamera,
+  onOpenHistoryImport,
 }) => {
   return (
     <header className="absolute top-0 left-0 right-0 z-30 px-5 py-3 flex items-center justify-between pointer-events-none">
-      {/* 1. Brand Logo */}
+      {/* 1. Brand Logo & Live Data Badge */}
       <div className="flex items-center gap-3 pointer-events-auto">
         <div className="w-9 h-9 rounded-xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center shadow-lg shadow-cyan-500/20">
           <Sparkles className="w-5 h-5 text-cyan-400 animate-pulse" />
@@ -56,6 +61,13 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
           <p className="text-[11px] text-slate-400 font-medium">Cognitive Activity Roadmap</p>
         </div>
+
+        {dataSummary && dataSummary.total_events > 0 && (
+          <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 text-xs font-medium backdrop-blur-md shadow-sm">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+            <span>Live data: {dataSummary.date_span_days || 1} {(dataSummary.date_span_days || 1) === 1 ? "day" : "days"}, {dataSummary.total_events} events</span>
+          </div>
+        )}
       </div>
 
       {/* 2. Mode Selector Pills */}
@@ -178,6 +190,18 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           <RotateCcw className="w-4 h-4" />
         </button>
+
+        {/* Import History Shortcut */}
+        {onOpenHistoryImport && (
+          <button
+            onClick={onOpenHistoryImport}
+            title="Import Browser History"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-600/20 hover:bg-cyan-600/40 border border-cyan-500/30 text-cyan-300 text-xs font-semibold transition-all shadow-lg"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Import</span>
+          </button>
+        )}
       </div>
     </header>
   );

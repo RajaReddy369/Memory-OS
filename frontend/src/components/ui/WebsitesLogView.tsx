@@ -23,11 +23,6 @@ import {
   WebsiteSummaryItem,
   SearchTimelineItem,
 } from "../../types";
-import {
-  generateSampleWebsiteDetail,
-  generateSampleWebsites,
-  generateSampleSearches,
-} from "../../data/sampleData";
 
 interface WebsitesLogViewProps {
   onFlyToDomainIn3D: (domain: string) => void;
@@ -67,12 +62,12 @@ export const WebsitesLogView: React.FC<WebsitesLogViewProps> = ({
       });
       if (res.ok) {
         const data = await res.json();
-        setWebsites(data.length > 0 ? data : generateSampleWebsites());
+        setWebsites(Array.isArray(data) ? data : []);
       } else {
-        setWebsites(generateSampleWebsites());
+        setWebsites([]);
       }
     } catch {
-      setWebsites(generateSampleWebsites());
+      setWebsites([]);
     } finally {
       setIsLoading(false);
     }
@@ -86,12 +81,12 @@ export const WebsitesLogView: React.FC<WebsitesLogViewProps> = ({
       });
       if (res.ok) {
         const data = await res.json();
-        setSearches(data.length > 0 ? data : generateSampleSearches());
+        setSearches(Array.isArray(data) ? data : []);
       } else {
-        setSearches(generateSampleSearches());
+        setSearches([]);
       }
     } catch {
-      setSearches(generateSampleSearches());
+      setSearches([]);
     }
   };
 
@@ -106,10 +101,10 @@ export const WebsitesLogView: React.FC<WebsitesLogViewProps> = ({
         const data = await res.json();
         setSelectedDetail(data);
       } else {
-        setSelectedDetail(generateSampleWebsiteDetail(dom));
+        setSelectedDetail(null);
       }
     } catch {
-      setSelectedDetail(generateSampleWebsiteDetail(dom));
+      setSelectedDetail(null);
     } finally {
       setIsLoading(false);
     }

@@ -26,8 +26,10 @@ from backend.config import (
 )
 from backend.database import (
     backfill_search_queries,
+    delete_events_by_source,
     delete_website_history,
     get_all_searches,
+    get_data_summary,
     get_db_connection,
     get_event_count,
     get_projects,
@@ -41,6 +43,7 @@ from backend.database import (
     insert_events_batch,
     search_events,
 )
+from backend.graph3d import get_real_graph3d_data, get_real_graph3d_node_detail
 from backend.embedding_worker import enqueue_for_embedding, start_worker, stop_worker
 from backend.llm import get_llm_client
 from backend.memory import handle_special_memory_commands
@@ -538,6 +541,67 @@ async def get_searches_endpoint(
     Retrieve all search queries across every visited website in a unified chronological timeline.
     """
     return get_all_searches(domain=domain, q=q, from_time=from_time, to_time=to_time, limit=limit)
+
+
+@app.get("/api/data/summary")
+async def get_data_summary_endpoint(
+    _: None = Security(verify_api_key)
+):
+    """
+    Returns real summary metrics of stored events, date spans, sources, and counts.
+    """
+    return get_data_summary()
+
+
+@app.delete("/api/events/source/{source}")
+async def delete_events_source_endpoint(
+    source: str,
+    _: None = Security(verify_api_key)
+):
+    """
+    Delete all events from a specific source (e.g. edge_history).
+    """
+    count = delete_events_by_source(source)
+    return {
+        "status": "success",
+        "source": source,
+        "deleted_count": count
+    }
+
+
+@app.get("/api/graph3d")
+async def get_graph3d_endpoint(
+    from_time: Optional[float] = Query(None, alias="from"),
+    to_time: Optional[float] = Query(None, alias="to"),
+    level: str = Query("session"),
+    source: Optional[str] = Query(None),
+    max_nodes: int = Query(2000),
+    _: None = Security(verify_api_key)
+):
+    """
+    Return real 3D spatial graph data with deterministic cached positions.
+    """
+    return get_real_graph3d_data(
+        from_time=from_time,
+        to_time=to_time,
+        level=level,
+        source=source,
+        max_nodes=max_nodes
+    )
+
+
+@app.get("/api/graph3d/node/{node_id:path}")
+async def get_graph3d_node_detail_endpoint(
+    node_id: str,
+    _: None = Security(verify_api_key)
+):
+    """
+    Return full details for a clicked 3D node (event or city/domain).
+    """
+    detail = get_real_graph3d_node_detail(node_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Node not found")
+    return detail
 
 
 def main():

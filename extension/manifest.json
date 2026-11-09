@@ -2,12 +2,16 @@
   "manifest_version": 3,
   "name": "MemoryOS Browser Agent",
   "version": "1.0.0",
-  "description": "Continuous, private memory recorder for MemoryOS",
+  "description": "Continuous, private memory recorder and 3D cognitive roadmap for MemoryOS",
   "permissions": [
     "activeTab",
     "tabs",
     "storage",
-    "webNavigation"
+    "webNavigation",
+    "sidePanel"
+  ],
+  "optional_permissions": [
+    "history"
   ],
   "host_permissions": [
     "<all_urls>",
@@ -22,6 +26,9 @@
   "background": {
     "service_worker": "background.js"
   },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
@@ -31,10 +38,20 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "MemoryOS Status",
+    "default_title": "MemoryOS",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png"
     }
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "world/*",
+        "world.html",
+        "icons/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }
