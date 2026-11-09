@@ -13,12 +13,11 @@ import re
 from typing import List
 import httpx
 
-from backend.config import DATA_DIR
+from backend.config import DATA_DIR, OLLAMA_EMBEDDING_MODEL, OLLAMA_HOST
 
 logger = logging.getLogger("memoryos.embeddings")
 
-DEFAULT_EMBED_MODEL = os.environ.get("MEMORYOS_EMBED_MODEL", "nomic-embed-text")
-OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+DEFAULT_EMBED_MODEL = OLLAMA_EMBEDDING_MODEL
 EMBED_DIMENSION = 768
 
 

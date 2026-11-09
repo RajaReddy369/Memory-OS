@@ -13,7 +13,17 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, Security, We
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from backend.config import API_TOKEN, CORS_ORIGIN_REGEX, DATA_DIR, DB_PATH, HOST, OLLAMA_HOST, PORT
+from backend.config import (
+    API_TOKEN,
+    CORS_ORIGIN_REGEX,
+    DATA_DIR,
+    DB_PATH,
+    HOST,
+    OLLAMA_CHAT_MODEL,
+    OLLAMA_EMBEDDING_MODEL,
+    OLLAMA_HOST,
+    PORT,
+)
 from backend.database import (
     backfill_search_queries,
     delete_website_history,
@@ -45,6 +55,7 @@ from backend.models import (
     StatusResponse,
 )
 from backend.rag import format_timestamp, get_rag_engine
+from backend.reranker import get_active_reranker_info
 from backend.sessions import recompute_sessions
 from backend.vector_store import get_vector_store
 
@@ -157,7 +168,10 @@ async def get_status(_: None = Security(verify_api_key)):
         total_events=total_events,
         total_vectors=total_vectors,
         recording_active=not is_recording_paused,
-        ollama_status=ollama_stat
+        ollama_status=ollama_stat,
+        chat_model=OLLAMA_CHAT_MODEL,
+        embedding_model=OLLAMA_EMBEDDING_MODEL,
+        reranker=get_active_reranker_info()
     )
 
 

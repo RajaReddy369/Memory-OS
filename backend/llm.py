@@ -10,10 +10,11 @@ import os
 from typing import AsyncGenerator, Dict, List, Optional
 import httpx
 
+from backend.config import OLLAMA_CHAT_MODEL, OLLAMA_HOST
+
 logger = logging.getLogger("memoryos.llm")
 
-DEFAULT_CHAT_MODEL = os.environ.get("MEMORYOS_CHAT_MODEL", "llama3.2")
-OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+DEFAULT_CHAT_MODEL = OLLAMA_CHAT_MODEL
 
 SYSTEM_PROMPT = """You are MemoryOS, a personal second brain that remembers digital activity.
 You are answering questions based EXCLUSIVELY on the user's recorded memory passages provided in the context.

@@ -147,10 +147,16 @@ PASSWORD_MANAGER_PROCESSES: Set[str] = {
     "lastpass.exe",
 }
 
-# Session segmentation & LLM Model
+# Session segmentation & LLM Model (Configurable via environment variables)
+OLLAMA_CHAT_MODEL = os.environ.get("MEMORYOS_CHAT_MODEL", "llama3.2:3b")
+OLLAMA_EMBEDDING_MODEL = os.environ.get("MEMORYOS_EMBEDDING_MODEL", "nomic-embed-text")
 SESSION_GAP_SECONDS = 600.0  # 10 minutes gap marks a session boundary
-SESSION_LABEL_MODEL = os.environ.get("MEMORYOS_SESSION_MODEL", "llama3.2")
+SESSION_LABEL_MODEL = os.environ.get("MEMORYOS_SESSION_MODEL", OLLAMA_CHAT_MODEL)
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+
+# Neural Cross-Encoder Reranker configuration
+USE_NEURAL_RERANKER = os.environ.get("MEMORYOS_USE_NEURAL_RERANKER", "false").lower() in ("true", "1", "yes")
+NEURAL_RERANKER_MODEL = os.environ.get("MEMORYOS_RERANKER_MODEL", "BAAI/bge-reranker-base")
 
 # Desktop Agent Resource Caps
 MAX_IDLE_CPU_PERCENT = 3.0   # Must stay under 3% CPU at idle

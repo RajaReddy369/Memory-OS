@@ -92,3 +92,6 @@ class StatusResponse(BaseModel):
     total_vectors: int
     recording_active: bool
     ollama_status: str = "unknown"
+    chat_model: str = "llama3.2:3b"
+    embedding_model: str = "nomic-embed-text"
+    reranker: Optional[Dict[str, Any]] = None

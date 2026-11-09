@@ -132,3 +132,4 @@ def extract_search_query(url: Optional[str]) -> Optional[Tuple[str, str]]:
         return None
 
     return None
+

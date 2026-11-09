@@ -17,6 +17,19 @@ from desktop_agent.window_tracker import get_active_window_info
 
 logger = logging.getLogger("memoryos.typing_tracker")
 
+SENSITIVE_EDITOR_KEYWORDS = (
+    ".env", "config.", "config_", "secrets", "credential", "id_rsa",
+    ".pem", ".key", ".kdbx", "password", "token"
+)
+
+
+def is_sensitive_editor_title(title: str) -> bool:
+    """Check if the active editor window title indicates a sensitive file (.env, config, secrets)."""
+    if not title:
+        return False
+    title_lower = title.lower()
+    return any(keyword in title_lower for keyword in SENSITIVE_EDITOR_KEYWORDS)
+
 
 class SelectiveTypingWatcher:
     """Listens for typing strictly within allowed productivity applications."""
@@ -67,7 +80,13 @@ class SelectiveTypingWatcher:
         app_name = win_info.get("app_name", proc)
         title = win_info.get("title", "")
 
-        # 2. Extract character
+        # 2. In VS Code/Cursor, skip typing capture when open file is .env, config, or secrets-like
+        if proc in ("code.exe", "cursor.exe", "devenv.exe") and is_sensitive_editor_title(title):
+            with self._lock:
+                self.accumulated_text = ""
+            return
+
+        # 3. Extract character
         char = None
         try:
             if hasattr(key, "char") and key.char:

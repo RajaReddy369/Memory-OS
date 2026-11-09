@@ -337,3 +337,4 @@ def test_delete_website_history():
     assert get_website_detail("example.com") is None
     summary = get_websites_summary()
     assert not any(s["domain"] == "example.com" for s in summary)
+
