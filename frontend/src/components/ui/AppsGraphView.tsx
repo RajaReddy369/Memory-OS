@@ -673,3 +673,4 @@ export const AppsGraphView: React.FC<AppsGraphViewProps> = ({
     </div>
   );
 };
+

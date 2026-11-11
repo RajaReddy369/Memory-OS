@@ -205,8 +205,9 @@ export const App: React.FC = () => {
       const sessRes = await fetch("http://127.0.0.1:8000/api/sessions", { headers });
       if (sessRes.ok) {
         const sessData = await sessRes.json();
-        if (Array.isArray(sessData) && sessData.length > 0) {
-          const realSessions: SessionNode[] = sessData.map((s: any, idx: number) => {
+        const rawList = Array.isArray(sessData) ? sessData : (sessData?.sessions || []);
+        if (rawList.length > 0) {
+          const realSessions: SessionNode[] = rawList.map((s: any, idx: number) => {
             const startTime = s.start_time || Date.now() / 1000;
             const endTime = s.end_time || startTime;
             const durMin = Math.round((s.duration || 0) / 60) || 1;

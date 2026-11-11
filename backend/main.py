@@ -8,6 +8,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import json
 import logging
+import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Security, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -125,12 +126,16 @@ app.add_middleware(
 
 
 def verify_api_key(
+    request: Request = None,
     x_memoryos_key: Optional[str] = Header(None, alias="X-MemoryOS-Key"),
     authorization: Optional[str] = Header(None)
 ):
     """
-    Validate that incoming requests carry the correct secret API token.
-    Prevents malicious websites running in the browser from querying or writing memory data.
+    Validate incoming requests.
+    - If valid API token is provided in header: Allowed.
+    - If origin is a browser extension (chrome-extension://, edge-extension://): Allowed.
+    - If request is local (localhost/127.0.0.1) and not cross-site: Allowed.
+    - Rejects invalid tokens and external cross-origin websites with 401 Unauthorized.
     """
     token_provided = x_memoryos_key if isinstance(x_memoryos_key, str) else None
 
@@ -140,11 +145,32 @@ def verify_api_key(
         else:
             token_provided = authorization.strip()
 
-    if not token_provided or token_provided != API_TOKEN:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing MemoryOS security token. Provide header 'X-MemoryOS-Key'."
-        )
+    # 1. Valid API token provided: Always allow
+    if token_provided and token_provided == API_TOKEN:
+        return
+
+    # 2. Check Origin / Referer for browser extension or local execution
+    if request:
+        origin = request.headers.get("origin", "").lower()
+        referer = request.headers.get("referer", "").lower()
+        sec_fetch_site = request.headers.get("sec-fetch-site", "").lower()
+
+        # Browser extensions (Chrome, Edge, Firefox, Brave)
+        is_extension = bool(re.match(r"^(chrome-extension|edge-extension|extension|moz-extension)://", origin)) or \
+                       bool(re.match(r"^(chrome-extension|edge-extension|extension|moz-extension)://", referer))
+        if is_extension:
+            return
+
+        # Direct local calls without cross-site origin (desktop agent, python, curl)
+        is_direct_local = (not origin and not referer) or \
+                          bool(re.match(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?", origin))
+        if is_direct_local and sec_fetch_site != "cross-site" and not token_provided:
+            return
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or missing MemoryOS security token. Provide header 'X-MemoryOS-Key'."
+    )
 
 
 import re
@@ -220,6 +246,12 @@ async def get_status(_: None = Security(verify_api_key)):
     )
 
 
+@app.get("/api/projects")
+async def get_projects_endpoint(_: None = Security(verify_api_key)):
+    """Retrieve list of active projects and associated session metrics."""
+    return get_projects()
+
+
 @app.get("/api/sessions")
 async def list_sessions(
     from_time: Optional[float] = Query(None, alias="from"),
@@ -230,7 +262,7 @@ async def list_sessions(
 ):
     """Retrieve list of segmented user activity sessions."""
     sessions = get_sessions(start_time=from_time, end_time=to_time, project=project, limit=limit)
-    return {"sessions": sessions, "count": len(sessions)}
+    return sessions
 
 
 @app.get("/api/sessions/{session_id}")
