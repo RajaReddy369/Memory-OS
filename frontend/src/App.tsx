@@ -284,6 +284,7 @@ export const App: React.FC = () => {
         } else {
           setSessions([]);
           setCityTowers([]);
+          setViewMode((prev) => (prev === "JOURNEY" ? "GALAXY" : prev));
         }
       }
     } catch (e) {

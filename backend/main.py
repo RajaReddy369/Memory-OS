@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 import json
 import logging
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional, Set
+from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Union
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Security, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -90,8 +90,11 @@ async def lifespan(app: FastAPI):
         backfilled = backfill_search_queries()
         if backfilled > 0:
             logger.info(f"Backfilled {backfilled} search query events from existing URLs")
+        if get_event_count() > 0 and len(get_sessions(limit=1)) == 0:
+            logger.info("Auto-segmenting existing events into sessions on startup...")
+            await recompute_sessions()
     except Exception as e:
-        logger.warning(f"Search backfill warning: {e}")
+        logger.warning(f"Search backfill / session auto-segment warning: {e}")
     start_worker()
     logger.info(f"MemoryOS started on {HOST}:{PORT}")
     logger.info(f"Data directory: {DATA_DIR}")
@@ -262,6 +265,12 @@ async def list_sessions(
 ):
     """Retrieve list of segmented user activity sessions."""
     sessions = get_sessions(start_time=from_time, end_time=to_time, project=project, limit=limit)
+    if not sessions and get_event_count() > 0:
+        try:
+            await recompute_sessions(start_time=from_time, end_time=to_time)
+            sessions = get_sessions(start_time=from_time, end_time=to_time, project=project, limit=limit)
+        except Exception as e:
+            logger.warning(f"Auto-segmenting sessions on list failed: {e}")
     return sessions
 
 
@@ -338,15 +347,16 @@ async def ingest_single_event(
 
 @app.post("/api/events/batch")
 async def ingest_batch_events(
-    batch: BatchIngestRequest,
+    batch: Union[BatchIngestRequest, List[EventIngestItem]],
     _: None = Security(verify_api_key)
 ):
     """Ingest a batch of activity events."""
     if is_recording_paused:
         return {"status": "paused", "stored_count": 0}
 
+    items = batch.events if isinstance(batch, BatchIngestRequest) else batch
     stored_count = 0
-    for item in batch.events:
+    for item in items:
         eid = insert_event(item)
         if eid:
             stored_count += 1
