@@ -606,9 +606,11 @@ def get_apps_tree(conn: Optional[sqlite3.Connection] = None) -> Dict[str, Any]:
     Empty database returns only root node.
     """
     G = get_cached_graph(conn=conn)
+    root_id = "root:desktop"
+    if not G.has_node(root_id) or len(G.nodes) <= 1:
+        G = build_unified_graph(conn=conn)
 
     # Find root
-    root_id = "root:desktop"
     if not G.has_node(root_id):
         return {
             "id": root_id,

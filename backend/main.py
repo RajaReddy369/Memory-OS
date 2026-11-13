@@ -12,7 +12,8 @@ import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Union
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Security, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from backend.apps_graph import (
     delete_app_graph,
@@ -93,6 +94,8 @@ async def lifespan(app: FastAPI):
         if get_event_count() > 0 and len(get_sessions(limit=1)) == 0:
             logger.info("Auto-segmenting existing events into sessions on startup...")
             await recompute_sessions()
+        from backend.apps_graph import get_cached_graph
+        get_cached_graph()
     except Exception as e:
         logger.warning(f"Search backfill / session auto-segment warning: {e}")
     start_worker()
@@ -176,7 +179,157 @@ def verify_api_key(
     )
 
 
+from pathlib import Path
 import re
+
+# Mount 3D World Web View if compiled assets exist
+world_dir = Path(__file__).resolve().parent.parent / "extension" / "world"
+if world_dir.exists():
+    app.mount("/world", StaticFiles(directory=str(world_dir), html=True), name="world")
+
+
+@app.get("/", response_class=HTMLResponse)
+async def root_dashboard():
+    """Friendly local dashboard providing links to the 3D World, API docs, and health status."""
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MemoryOS Local Engine</title>
+  <style>
+    body {
+      background: #030712;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .card {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 20px;
+      padding: 36px;
+      max-width: 520px;
+      width: 100%;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+      text-align: center;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #10b981;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      background: #10b981;
+      border-radius: 50%;
+    }
+    h1 {
+      font-size: 26px;
+      font-weight: 700;
+      margin: 0 0 10px;
+      color: #ffffff;
+      letter-spacing: -0.5px;
+    }
+    p {
+      color: #94a3b8;
+      font-size: 14px;
+      line-height: 1.5;
+      margin: 0 0 24px;
+    }
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: #06b6d4;
+      color: #030712;
+      box-shadow: 0 4px 14px rgba(6, 182, 212, 0.3);
+    }
+    .btn-primary:hover {
+      background: #22d3ee;
+    }
+    .btn-secondary {
+      background: #1e293b;
+      color: #cbd5e1;
+      border: 1px solid #334155;
+    }
+    .btn-secondary:hover {
+      background: #334155;
+      color: #ffffff;
+    }
+    .hint {
+      font-size: 12px;
+      color: #64748b;
+      line-height: 1.6;
+      border-top: 1px solid #1e293b;
+      padding-top: 16px;
+    }
+    code {
+      color: #38bdf8;
+      background: #020617;
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">
+      <span class="dot"></span>
+      Backend Engine Running
+    </div>
+    <h1>MemoryOS</h1>
+    <p>Privacy-first personal second brain & 3D cognitive roadmap running locally on port 8000.</p>
+    
+    <div class="btn-group">
+      <a href="/world" class="btn btn-primary">
+        Launch 3D World (Web View) &rarr;
+      </a>
+      <a href="/docs" class="btn btn-secondary">
+        Interactive API Docs (Swagger)
+      </a>
+    </div>
+
+    <div class="hint">
+      <strong>Browser Extension:</strong> To use the live browser recorder and docked side panel, click the MemoryOS extension icon in your browser toolbar and click <code>Open 3D World</code>.
+    </div>
+  </div>
+</body>
+</html>
+"""
+
 
 @app.get("/api/health")
 async def health_check():

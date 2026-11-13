@@ -30,10 +30,15 @@ export const JourneyRoad: React.FC<JourneyRoadProps> = ({
 }) => {
   // 1. Construct 3D Spline Curve through session positions
   const { curve, points } = useMemo(() => {
-    if (!sessions || sessions.length < 2) {
+    if (!sessions || sessions.length === 0) {
       return { curve: null, points: [] };
     }
-    const pts = sessions.map((s) => new THREE.Vector3(...s.position3D));
+    let pts = sessions.map((s) => new THREE.Vector3(...s.position3D));
+    if (pts.length === 1) {
+      // Create a smooth incoming road so a single session also displays a glowing road ribbon
+      const p = pts[0];
+      pts = [new THREE.Vector3(p.x - 8, p.y - 1, p.z - 10), p];
+    }
     const spline = new THREE.CatmullRomCurve3(pts, false, "centripetal", 0.5);
     return { curve: spline, points: pts };
   }, [sessions]);
@@ -213,11 +218,13 @@ export const JourneyRoad: React.FC<JourneyRoadProps> = ({
       })}
 
       {/* 4. Replay Vehicle / Camera Pointer */}
-      <mesh ref={vehicleRef}>
-        <sphereGeometry args={[0.75, 16, 16]} />
-        <meshBasicMaterial color="#ffffff" />
-        <pointLight color="#38bdf8" intensity={4} distance={15} />
-      </mesh>
+      {isReplaying && (
+        <mesh ref={vehicleRef}>
+          <sphereGeometry args={[0.75, 16, 16]} />
+          <meshBasicMaterial color="#ffffff" />
+          <pointLight color="#38bdf8" intensity={4} distance={15} />
+        </mesh>
+      )}
     </group>
   );
 };
